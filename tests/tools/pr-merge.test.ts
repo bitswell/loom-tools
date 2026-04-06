@@ -48,11 +48,17 @@ describe('pr-merge tool', () => {
   });
 
   it('defaults to merge method', async () => {
-    mockExec.mockResolvedValueOnce({
-      stdout: 'merged\n',
-      stderr: '',
-      exitCode: 0,
-    });
+    mockExec
+      .mockResolvedValueOnce({
+        stdout: 'merged\n',
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: 'merge-sha\n',
+        stderr: '',
+        exitCode: 0,
+      });
 
     await prMergeTool.handler({ number: 1 }, makeCtx());
 
@@ -64,11 +70,17 @@ describe('pr-merge tool', () => {
   });
 
   it('uses squash method when specified', async () => {
-    mockExec.mockResolvedValueOnce({
-      stdout: 'squashed\n',
-      stderr: '',
-      exitCode: 0,
-    });
+    mockExec
+      .mockResolvedValueOnce({
+        stdout: 'squashed\n',
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: 'squash-sha\n',
+        stderr: '',
+        exitCode: 0,
+      });
 
     await prMergeTool.handler({ number: 5, method: 'squash' }, makeCtx());
 
@@ -80,11 +92,17 @@ describe('pr-merge tool', () => {
   });
 
   it('uses rebase method when specified', async () => {
-    mockExec.mockResolvedValueOnce({
-      stdout: 'rebased\n',
-      stderr: '',
-      exitCode: 0,
-    });
+    mockExec
+      .mockResolvedValueOnce({
+        stdout: 'rebased\n',
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: 'rebase-sha\n',
+        stderr: '',
+        exitCode: 0,
+      });
 
     await prMergeTool.handler({ number: 5, method: 'rebase' }, makeCtx());
 
