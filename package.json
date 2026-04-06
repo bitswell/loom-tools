@@ -1,0 +1,35 @@
+{
+  "name": "loom-tools",
+  "version": "0.1.0",
+  "description": "Typed tool runtime for LOOM agents — role-scoped, event-driven, LLM-agnostic",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "loom-tools": "dist/runtime/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bitswell/loom-tools.git"
+  },
+  "keywords": ["loom", "agents", "tools", "mcp", "orchestration"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0",
+    "@types/node": "^22.0.0"
+  }
+}
