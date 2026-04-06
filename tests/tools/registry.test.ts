@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { createDefaultRegistry } from '../../src/tools/index.js';
 
 describe('createDefaultRegistry', () => {
-  it('registers all 16 built-in tools', () => {
+  it('registers all 19 built-in tools', () => {
     const registry = createDefaultRegistry();
-    expect(registry.size).toBe(16);
+    expect(registry.size).toBe(19);
   });
 
   // Phase 2 tools
@@ -91,6 +91,22 @@ describe('createDefaultRegistry', () => {
     expect(registry.get('tool-request')).toBeDefined();
   });
 
+  // Phase 4 — repo management tools
+  it('registers ci-generate tool', () => {
+    const registry = createDefaultRegistry();
+    expect(registry.get('ci-generate')).toBeDefined();
+  });
+
+  it('registers repo-init tool', () => {
+    const registry = createDefaultRegistry();
+    expect(registry.get('repo-init')).toBeDefined();
+  });
+
+  it('registers compliance-check tool', () => {
+    const registry = createDefaultRegistry();
+    expect(registry.get('compliance-check')).toBeDefined();
+  });
+
   // Role scoping
   it('writer can access commit, push, compile, test, read-assignment, status-query, tool-request', () => {
     const registry = createDefaultRegistry();
@@ -139,10 +155,18 @@ describe('createDefaultRegistry', () => {
     expect(names).not.toContain('dispatch');
   });
 
-  it('orchestrator can access all 16 tools', () => {
+  it('writer cannot access phase 4 orchestrator tools', () => {
+    const registry = createDefaultRegistry();
+    const names = registry.namesForRole('writer');
+    expect(names).not.toContain('ci-generate');
+    expect(names).not.toContain('repo-init');
+    expect(names).not.toContain('compliance-check');
+  });
+
+  it('orchestrator can access all 19 tools', () => {
     const registry = createDefaultRegistry();
     const names = registry.namesForRole('orchestrator');
-    expect(names).toHaveLength(16);
+    expect(names).toHaveLength(19);
   });
 
   it('calling createDefaultRegistry twice creates independent registries', () => {

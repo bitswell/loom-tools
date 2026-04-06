@@ -15,6 +15,9 @@ import { prMergeTool } from './pr-merge.js';
 import { reviewRequestTool } from './review-request.js';
 import { submoduleTool } from './submodule.js';
 import { toolRequestTool } from './tool-request.js';
+import { ciGenerateTool } from './ci-generate.js';
+import { repoInitTool } from './repo-init.js';
+import { complianceCheckTool } from './compliance-check.js';
 
 // Phase 2 exports
 export { commitTool } from './commit.js';
@@ -35,6 +38,11 @@ export { prMergeTool } from './pr-merge.js';
 export { reviewRequestTool } from './review-request.js';
 export { submoduleTool } from './submodule.js';
 export { toolRequestTool } from './tool-request.js';
+
+// Phase 4 exports
+export { ciGenerateTool, generateCiFiles } from './ci-generate.js';
+export { repoInitTool } from './repo-init.js';
+export { complianceCheckTool, parseOwnerRepo } from './compliance-check.js';
 
 /**
  * Create a registry with all built-in LOOM tools registered.
@@ -65,6 +73,11 @@ export function createDefaultRegistry(): ToolRegistry {
 
   // Phase 3 — self-service (all roles)
   registry.register(toolRequestTool);
+
+  // Phase 4 — repo management tools (orchestrator only)
+  registry.register(ciGenerateTool);
+  registry.register(repoInitTool);
+  registry.register(complianceCheckTool);
 
   return registry;
 }
