@@ -74,10 +74,12 @@ function parseCounts(
   const text = stdout + '\n' + stderr;
 
   if (language === 'typescript') {
-    // Vitest: "Tests  5 passed (5)" or "Tests  3 passed | 1 failed (4)"
-    const passed = text.match(/(\d+)\s+passed/)?.[1];
-    const failed = text.match(/(\d+)\s+failed/)?.[1];
-    const skipped = text.match(/(\d+)\s+skipped/)?.[1];
+    // Vitest summary line: "Tests  5 passed (5)" or "Tests  3 passed | 1 failed (4)"
+    // Anchor to "Tests" to avoid matching "Test Files" line counts.
+    const testsLine = text.match(/Tests\s+.*/)?.[0] ?? '';
+    const passed = testsLine.match(/(\d+)\s+passed/)?.[1];
+    const failed = testsLine.match(/(\d+)\s+failed/)?.[1];
+    const skipped = testsLine.match(/(\d+)\s+skipped/)?.[1];
     return {
       passed: Number(passed ?? 0),
       failed: Number(failed ?? 0),
