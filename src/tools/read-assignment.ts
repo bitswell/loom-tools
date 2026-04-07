@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { Tool } from '../types/tool.js';
 import { ok, err } from '../types/result.js';
 import { exec } from '../util/exec.js';
+import { parseTrailers } from '../util/trailers.js';
 
 const ReadAssignmentInput = z.object({
   branch: z
@@ -107,16 +108,3 @@ export const readAssignmentTool: Tool<ReadAssignmentIn, ReadAssignmentOut> = {
   },
 };
 
-function parseTrailers(raw: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const line of raw.split('\n')) {
-    const idx = line.indexOf(':');
-    if (idx === -1) continue;
-    const key = line.slice(0, idx).trim();
-    const value = line.slice(idx + 1).trim();
-    if (key && value) {
-      result[key] = value;
-    }
-  }
-  return result;
-}
