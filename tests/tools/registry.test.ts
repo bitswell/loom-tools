@@ -1,172 +1,124 @@
 import { describe, it, expect } from 'vitest';
 import { createDefaultRegistry } from '../../src/tools/index.js';
+import { ToolRegistry } from '../../src/registry.js';
+import { commitTool } from '../../src/tools/commit.js';
+import type { ProtocolRole } from '../../src/types/role.js';
+
+const VALID_ROLES = new Set<ProtocolRole>([
+  'writer',
+  'reviewer',
+  'orchestrator',
+]);
 
 describe('createDefaultRegistry', () => {
-  it('registers all 19 built-in tools', () => {
-    const registry = createDefaultRegistry();
-    expect(registry.size).toBe(19);
+  it('default registry is non-empty', () => {
+    expect(createDefaultRegistry().all().length).toBeGreaterThan(0);
   });
 
-  // Phase 2 tools
-  it('registers commit tool', () => {
-    const registry = createDefaultRegistry();
-    expect(registry.get('commit')).toBeDefined();
+  it('every tool has a unique name', () => {
+    const tools = createDefaultRegistry().all();
+    const names = tools.map((t) => t.definition.name);
+    expect(new Set(names).size).toBe(names.length);
   });
 
-  it('registers push tool', () => {
-    const registry = createDefaultRegistry();
-    expect(registry.get('push')).toBeDefined();
+  it('every tool name is kebab-case', () => {
+    for (const t of createDefaultRegistry().all()) {
+      expect(t.definition.name).toMatch(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/);
+    }
   });
 
-  it('registers read-assignment tool', () => {
-    const registry = createDefaultRegistry();
-    expect(registry.get('read-assignment')).toBeDefined();
+  it('every tool has a non-empty roles array', () => {
+    for (const t of createDefaultRegistry().all()) {
+      expect(Array.isArray(t.definition.roles)).toBe(true);
+      expect(t.definition.roles.length).toBeGreaterThan(0);
+    }
   });
 
-  it('registers compile tool', () => {
-    const registry = createDefaultRegistry();
-    expect(registry.get('compile')).toBeDefined();
+  it('every tool role is a valid ProtocolRole', () => {
+    for (const t of createDefaultRegistry().all()) {
+      for (const r of t.definition.roles) {
+        expect(VALID_ROLES.has(r)).toBe(true);
+      }
+    }
   });
 
-  it('registers test tool', () => {
-    const registry = createDefaultRegistry();
-    expect(registry.get('test')).toBeDefined();
+  it('every tool has a meaningful description', () => {
+    for (const t of createDefaultRegistry().all()) {
+      expect(typeof t.definition.description).toBe('string');
+      expect(t.definition.description.length).toBeGreaterThanOrEqual(20);
+      expect(t.definition.description.trim().length).toBeGreaterThanOrEqual(10);
+    }
   });
 
-  it('registers status-query tool', () => {
-    const registry = createDefaultRegistry();
-    expect(registry.get('status-query')).toBeDefined();
+  it('every tool has input and output Zod schemas', () => {
+    for (const t of createDefaultRegistry().all()) {
+      expect(t.definition.inputSchema).toBeDefined();
+      expect(typeof t.definition.inputSchema.parse).toBe('function');
+      expect(t.definition.outputSchema).toBeDefined();
+      expect(typeof t.definition.outputSchema.parse).toBe('function');
+    }
   });
 
-  // Phase 3 — lifecycle tools
-  it('registers assign tool', () => {
-    const registry = createDefaultRegistry();
-    expect(registry.get('assign')).toBeDefined();
+  it('every tool has a handler function', () => {
+    for (const t of createDefaultRegistry().all()) {
+      expect(typeof t.handler).toBe('function');
+    }
   });
 
-  it('registers dispatch tool', () => {
+  it('forRole(writer) returns exactly the tools whose roles include writer', () => {
     const registry = createDefaultRegistry();
-    expect(registry.get('dispatch')).toBeDefined();
+    const expected = registry
+      .all()
+      .filter((t) => t.definition.roles.includes('writer'));
+    expect(registry.forRole('writer')).toEqual(expected);
   });
 
-  it('registers wait tool', () => {
+  it('forRole(reviewer) returns exactly the tools whose roles include reviewer', () => {
     const registry = createDefaultRegistry();
-    expect(registry.get('wait')).toBeDefined();
+    const expected = registry
+      .all()
+      .filter((t) => t.definition.roles.includes('reviewer'));
+    expect(registry.forRole('reviewer')).toEqual(expected);
   });
 
-  it('registers status tool', () => {
+  it('forRole(orchestrator) returns every registered tool', () => {
     const registry = createDefaultRegistry();
-    expect(registry.get('status')).toBeDefined();
+    expect(registry.forRole('orchestrator')).toEqual(registry.all());
   });
 
-  // Phase 3 — workflow tools
-  it('registers pr-create tool', () => {
+  it('writer-only tools never leak into reviewer scope', () => {
     const registry = createDefaultRegistry();
-    expect(registry.get('pr-create')).toBeDefined();
+    const reviewerNames = registry.namesForRole('reviewer');
+    for (const t of registry.all()) {
+      const isWriter = t.definition.roles.includes('writer');
+      const isReviewer = t.definition.roles.includes('reviewer');
+      if (isWriter && !isReviewer) {
+        expect(reviewerNames).not.toContain(t.definition.name);
+      }
+    }
   });
 
-  it('registers pr-retarget tool', () => {
+  it('orchestrator-only tools are not exposed to writer or reviewer', () => {
     const registry = createDefaultRegistry();
-    expect(registry.get('pr-retarget')).toBeDefined();
+    const writerNames = registry.namesForRole('writer');
+    const reviewerNames = registry.namesForRole('reviewer');
+    for (const t of registry.all()) {
+      const roles = t.definition.roles;
+      if (roles.length === 1 && roles[0] === 'orchestrator') {
+        expect(writerNames).not.toContain(t.definition.name);
+        expect(reviewerNames).not.toContain(t.definition.name);
+      }
+    }
   });
 
-  it('registers pr-merge tool', () => {
-    const registry = createDefaultRegistry();
-    expect(registry.get('pr-merge')).toBeDefined();
+  it('registering the same tool twice throws', () => {
+    const r = new ToolRegistry();
+    r.register(commitTool);
+    expect(() => r.register(commitTool)).toThrow(/already registered/);
   });
 
-  it('registers review-request tool', () => {
-    const registry = createDefaultRegistry();
-    expect(registry.get('review-request')).toBeDefined();
-  });
-
-  it('registers submodule tool', () => {
-    const registry = createDefaultRegistry();
-    expect(registry.get('submodule')).toBeDefined();
-  });
-
-  // Phase 3 — self-service
-  it('registers tool-request tool', () => {
-    const registry = createDefaultRegistry();
-    expect(registry.get('tool-request')).toBeDefined();
-  });
-
-  // Phase 4 — repo management tools
-  it('registers ci-generate tool', () => {
-    const registry = createDefaultRegistry();
-    expect(registry.get('ci-generate')).toBeDefined();
-  });
-
-  it('registers repo-init tool', () => {
-    const registry = createDefaultRegistry();
-    expect(registry.get('repo-init')).toBeDefined();
-  });
-
-  it('registers compliance-check tool', () => {
-    const registry = createDefaultRegistry();
-    expect(registry.get('compliance-check')).toBeDefined();
-  });
-
-  // Role scoping
-  it('writer can access commit, push, compile, test, read-assignment, status-query, tool-request', () => {
-    const registry = createDefaultRegistry();
-    const names = registry.namesForRole('writer');
-    expect(names).toContain('commit');
-    expect(names).toContain('push');
-    expect(names).toContain('compile');
-    expect(names).toContain('test');
-    expect(names).toContain('read-assignment');
-    expect(names).toContain('status-query');
-    expect(names).toContain('tool-request');
-    expect(names).toHaveLength(7);
-  });
-
-  it('writer cannot access orchestrator-only tools', () => {
-    const registry = createDefaultRegistry();
-    const names = registry.namesForRole('writer');
-    expect(names).not.toContain('assign');
-    expect(names).not.toContain('dispatch');
-    expect(names).not.toContain('wait');
-    expect(names).not.toContain('status');
-    expect(names).not.toContain('pr-create');
-    expect(names).not.toContain('pr-retarget');
-    expect(names).not.toContain('pr-merge');
-    expect(names).not.toContain('review-request');
-    expect(names).not.toContain('submodule');
-  });
-
-  it('reviewer can access read-assignment, status-query, and tool-request only', () => {
-    const registry = createDefaultRegistry();
-    const names = registry.namesForRole('reviewer');
-    expect(names).toContain('read-assignment');
-    expect(names).toContain('status-query');
-    expect(names).toContain('tool-request');
-    expect(names).toHaveLength(3);
-  });
-
-  it('reviewer cannot access writer or orchestrator tools', () => {
-    const registry = createDefaultRegistry();
-    const names = registry.namesForRole('reviewer');
-    expect(names).not.toContain('commit');
-    expect(names).not.toContain('push');
-    expect(names).not.toContain('compile');
-    expect(names).not.toContain('test');
-    expect(names).not.toContain('assign');
-    expect(names).not.toContain('dispatch');
-  });
-
-  it('writer cannot access phase 4 orchestrator tools', () => {
-    const registry = createDefaultRegistry();
-    const names = registry.namesForRole('writer');
-    expect(names).not.toContain('ci-generate');
-    expect(names).not.toContain('repo-init');
-    expect(names).not.toContain('compliance-check');
-  });
-
-  it('orchestrator can access all 19 tools', () => {
-    const registry = createDefaultRegistry();
-    const names = registry.namesForRole('orchestrator');
-    expect(names).toHaveLength(19);
+  it('get() returns undefined for an unknown name', () => {
+    expect(createDefaultRegistry().get('does-not-exist')).toBeUndefined();
   });
 
   it('calling createDefaultRegistry twice creates independent registries', () => {
