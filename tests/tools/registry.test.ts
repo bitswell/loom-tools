@@ -11,6 +11,10 @@ const VALID_ROLES = new Set<ProtocolRole>([
 ]);
 
 describe('createDefaultRegistry', () => {
+  it('default registry is non-empty', () => {
+    expect(createDefaultRegistry().all().length).toBeGreaterThan(0);
+  });
+
   it('every tool has a unique name', () => {
     const tools = createDefaultRegistry().all();
     const names = tools.map((t) => t.definition.name);
@@ -19,7 +23,7 @@ describe('createDefaultRegistry', () => {
 
   it('every tool name is kebab-case', () => {
     for (const t of createDefaultRegistry().all()) {
-      expect(t.definition.name).toMatch(/^[a-z][a-z0-9-]*$/);
+      expect(t.definition.name).toMatch(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/);
     }
   });
 
@@ -42,6 +46,7 @@ describe('createDefaultRegistry', () => {
     for (const t of createDefaultRegistry().all()) {
       expect(typeof t.definition.description).toBe('string');
       expect(t.definition.description.length).toBeGreaterThanOrEqual(20);
+      expect(t.definition.description.trim().length).toBeGreaterThanOrEqual(10);
     }
   });
 
