@@ -96,7 +96,7 @@ const LifecycleCheckInput = z.object({
     .positive()
     .optional()
     .describe(
-      'Warn if the gap between consecutive IMPLEMENTING Heartbeats exceeds this many seconds. Default: 900 (15 min).',
+      'Warn if the gap between consecutive IMPLEMENTING Heartbeats exceeds this many seconds. Default: 300 (5 min, per issue #66).',
     ),
   heartbeatErrorSec: z
     .number()
@@ -104,7 +104,7 @@ const LifecycleCheckInput = z.object({
     .positive()
     .optional()
     .describe(
-      'Error if the gap between consecutive IMPLEMENTING Heartbeats exceeds this many seconds. Default: 3600 (60 min).',
+      'Error if the gap between consecutive IMPLEMENTING Heartbeats exceeds this many seconds. Default: 900 (15 min, per issue #66).',
     ),
 });
 
@@ -172,8 +172,9 @@ export const lifecycleCheckTool: Tool<LifecycleCheckIn, LifecycleCheckOut> = {
   },
   handler: async (input, ctx) => {
     const cwd = ctx.worktree;
-    const warnSec = input.heartbeatWarnSec ?? 900;
-    const errorSec = input.heartbeatErrorSec ?? 3600;
+    // Defaults per issue #66: warn at 5 min, error at 15 min while IMPLEMENTING.
+    const warnSec = input.heartbeatWarnSec ?? 300;
+    const errorSec = input.heartbeatErrorSec ?? 900;
 
     // Enumerate commits in base..branch in chronological order, walking
     // only the first-parent lineage. If the range is empty, this is
@@ -202,6 +203,7 @@ export const lifecycleCheckTool: Tool<LifecycleCheckIn, LifecycleCheckOut> = {
     const transitions: TransitionT[] = [];
     const violations: ViolationT[] = [];
     let prevHeartbeat: Date | null = null;
+    let prevHeartbeatIso: string | null = null;
     let assignedCount = 0;
     let completedCount = 0;
     let terminalReachedAt: string | null = null;
@@ -289,7 +291,19 @@ export const lifecycleCheckTool: Tool<LifecycleCheckIn, LifecycleCheckOut> = {
               const gapSec = Math.floor(
                 (hb.getTime() - prevHeartbeat.getTime()) / 1000,
               );
-              if (gapSec > errorSec) {
+              if (gapSec < 0) {
+                // Time travel: this Heartbeat is earlier than the
+                // previous IMPLEMENTING heartbeat. Without this branch,
+                // a negative gap silently passes (both > checks are
+                // false). Flag it as its own rule so callers can
+                // distinguish "silent" from "slow".
+                violations.push({
+                  rule: 'lifecycle-heartbeat-backward',
+                  commit: sha,
+                  detail: `Heartbeat moved backward by ${-gapSec}s (from ${prevHeartbeatIso ?? '<unknown>'} to ${heartbeatRaw ?? '<unknown>'})`,
+                  severity: 'error',
+                });
+              } else if (gapSec > errorSec) {
                 violations.push({
                   rule: 'lifecycle-heartbeat-gap-error',
                   commit: sha,
@@ -306,11 +320,13 @@ export const lifecycleCheckTool: Tool<LifecycleCheckIn, LifecycleCheckOut> = {
               }
             }
             prevHeartbeat = hb;
+            prevHeartbeatIso = heartbeatRaw ?? null;
           }
         } else {
           // Leaving IMPLEMENTING resets the heartbeat window so a
           // future re-entry (BLOCKED -> IMPLEMENTING) starts fresh.
           prevHeartbeat = null;
+          prevHeartbeatIso = null;
         }
       }
       // Non-Task-Status commits do not affect state or heartbeat window.

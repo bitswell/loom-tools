@@ -248,7 +248,13 @@ describe('lifecycle-check tool (branch walks)', () => {
         }),
       },
     ]);
-    const data = await runCheck(repo, 'loom/p2');
+    // Pass thresholds explicitly so this test's semantics
+    // ("heartbeats within warnSec") do not depend on whatever the
+    // current default happens to be.
+    const data = await runCheck(repo, 'loom/p2', 'main', {
+      heartbeatWarnSec: 600,
+      heartbeatErrorSec: 1800,
+    });
     expect(data.ok).toBe(true);
     expect(ruleIds(data.violations)).not.toContain('lifecycle-heartbeat-gap-warn');
     expect(ruleIds(data.violations)).not.toContain('lifecycle-heartbeat-gap-error');
@@ -403,7 +409,13 @@ describe('lifecycle-check tool (branch walks)', () => {
         }),
       },
     ]);
-    const data = await runCheck(repo, 'loom/p6');
+    // Pass thresholds explicitly — the 5-minute inter-heartbeat gap
+    // is exactly at the new default warn boundary, so rely on an
+    // explicit, generous window instead.
+    const data = await runCheck(repo, 'loom/p6', 'main', {
+      heartbeatWarnSec: 600,
+      heartbeatErrorSec: 1800,
+    });
     expect(data.ok).toBe(true);
   });
 
@@ -445,6 +457,107 @@ describe('lifecycle-check tool (branch walks)', () => {
     // an ASSIGNED-only branch is legal mid-stream.
     expect(data.ok).toBe(true);
     expect(ruleIds(data.violations)).not.toContain('lifecycle-missing-assigned');
+  });
+
+  it('P9a: default warn threshold is 300s — 299s gap passes (issue #66)', async () => {
+    // Locks in the spec'd default. If someone quietly loosens the
+    // default warn back up, this test stays clean — but see P9b.
+    const repo = await fresh();
+    await buildBranch(repo, 'loom/p9a', [
+      assigned({ agent: DEFAULT_AGENT, slug: 'p9a', scope: 'src/**' }),
+      {
+        subject: 'plan',
+        trailers: trailers({ 'Task-Status': 'PLANNING' }),
+      },
+      {
+        subject: 'begin',
+        trailers: trailers({
+          'Task-Status': 'IMPLEMENTING',
+          Heartbeat: '2026-04-09T00:00:00Z',
+        }),
+      },
+      {
+        // 299 seconds later — just under the 300s warn default
+        subject: 'under warn',
+        trailers: trailers({
+          'Task-Status': 'IMPLEMENTING',
+          Heartbeat: '2026-04-09T00:04:59Z',
+        }),
+      },
+    ]);
+    // No explicit thresholds — exercise the defaults.
+    const data = await runCheck(repo, 'loom/p9a');
+    expect(ruleIds(data.violations)).not.toContain(
+      'lifecycle-heartbeat-gap-warn',
+    );
+    expect(ruleIds(data.violations)).not.toContain(
+      'lifecycle-heartbeat-gap-error',
+    );
+  });
+
+  it('P9b: default warn threshold is 300s — 301s gap fires warn (issue #66)', async () => {
+    // If someone sets the default warn back to e.g. 900, this 301s
+    // gap will no longer trip the warn rule and this test will fail.
+    const repo = await fresh();
+    await buildBranch(repo, 'loom/p9b', [
+      assigned({ agent: DEFAULT_AGENT, slug: 'p9b', scope: 'src/**' }),
+      {
+        subject: 'plan',
+        trailers: trailers({ 'Task-Status': 'PLANNING' }),
+      },
+      {
+        subject: 'begin',
+        trailers: trailers({
+          'Task-Status': 'IMPLEMENTING',
+          Heartbeat: '2026-04-09T00:00:00Z',
+        }),
+      },
+      {
+        // 301 seconds later — over default warn (300), under default error (900)
+        subject: 'over warn',
+        trailers: trailers({
+          'Task-Status': 'IMPLEMENTING',
+          Heartbeat: '2026-04-09T00:05:01Z',
+        }),
+      },
+    ]);
+    const data = await runCheck(repo, 'loom/p9b');
+    expect(ruleIds(data.violations)).toContain('lifecycle-heartbeat-gap-warn');
+    expect(ruleIds(data.violations)).not.toContain(
+      'lifecycle-heartbeat-gap-error',
+    );
+  });
+
+  it('P9c: default error threshold is 900s — 901s gap fires error (issue #66)', async () => {
+    // If someone sets the default error back to e.g. 3600, this 901s
+    // gap will only trip warn and this test will fail.
+    const repo = await fresh();
+    await buildBranch(repo, 'loom/p9c', [
+      assigned({ agent: DEFAULT_AGENT, slug: 'p9c', scope: 'src/**' }),
+      {
+        subject: 'plan',
+        trailers: trailers({ 'Task-Status': 'PLANNING' }),
+      },
+      {
+        subject: 'begin',
+        trailers: trailers({
+          'Task-Status': 'IMPLEMENTING',
+          Heartbeat: '2026-04-09T00:00:00Z',
+        }),
+      },
+      {
+        // 901 seconds later — over default error (900)
+        subject: 'over error',
+        trailers: trailers({
+          'Task-Status': 'IMPLEMENTING',
+          Heartbeat: '2026-04-09T00:15:01Z',
+        }),
+      },
+    ]);
+    const data = await runCheck(repo, 'loom/p9c');
+    expect(ruleIds(data.violations)).toContain(
+      'lifecycle-heartbeat-gap-error',
+    );
   });
 
   // ---------- Negative cases ----------
@@ -727,6 +840,43 @@ describe('lifecycle-check tool (branch walks)', () => {
     const data = await runCheck(repo, 'loom/n10');
     expect(data.ok).toBe(false);
     expect(ruleIds(data.violations)).toContain('lifecycle-post-terminal');
+  });
+
+  it('N11: backward heartbeat between IMPLEMENTING commits -> lifecycle-heartbeat-backward', async () => {
+    // Two IMPLEMENTING commits where the second Heartbeat is earlier
+    // than the first. Without the explicit backward check, gapSec is
+    // negative and both warn/error comparisons silently pass.
+    const repo = await fresh();
+    await buildBranch(repo, 'loom/n11', [
+      assigned({ agent: DEFAULT_AGENT, slug: 'n11', scope: 'src/**' }),
+      {
+        subject: 'plan',
+        trailers: trailers({ 'Task-Status': 'PLANNING' }),
+      },
+      {
+        subject: 'begin',
+        trailers: trailers({
+          'Task-Status': 'IMPLEMENTING',
+          Heartbeat: '2026-04-08T00:00:00Z',
+        }),
+      },
+      {
+        // A full day earlier — time travel
+        subject: 'time travel',
+        trailers: trailers({
+          'Task-Status': 'IMPLEMENTING',
+          Heartbeat: '2026-04-07T00:00:00Z',
+        }),
+      },
+    ]);
+    const data = await runCheck(repo, 'loom/n11');
+    expect(data.ok).toBe(false);
+    const ids = ruleIds(data.violations);
+    expect(ids).toContain('lifecycle-heartbeat-backward');
+    // And must NOT also fire gap-warn or gap-error for the same edge
+    // — the backward branch is taken before the forward thresholds.
+    expect(ids).not.toContain('lifecycle-heartbeat-gap-warn');
+    expect(ids).not.toContain('lifecycle-heartbeat-gap-error');
   });
 
   // ---------- Sanity: transitions[] ordering ----------
