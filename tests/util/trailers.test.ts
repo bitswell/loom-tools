@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseTrailers } from '../../src/util/trailers.js';
+import { parseTrailers, parseTrailersMulti } from '../../src/util/trailers.js';
 
 describe('parseTrailers', () => {
   it('parses standard git trailers', () => {
@@ -53,5 +53,64 @@ Task-Status: COMPLETED`;
     const raw = `: value\nKey: `;
     const result = parseTrailers(raw);
     expect(Object.keys(result)).toHaveLength(0);
+  });
+});
+
+describe('parseTrailersMulti', () => {
+  it('parses a single-value trailer into a 1-element array', () => {
+    const raw = 'Agent-Id: ratchet';
+    const result = parseTrailersMulti(raw);
+    expect(result).toEqual({ 'Agent-Id': ['ratchet'] });
+  });
+
+  it('collects repeated keys into an ordered array', () => {
+    const raw = `Key-Finding: first
+Key-Finding: second
+Key-Finding: third`;
+    const result = parseTrailersMulti(raw);
+    expect(result['Key-Finding']).toEqual(['first', 'second', 'third']);
+  });
+
+  it('mixes repeated and unique keys correctly', () => {
+    const raw = `Agent-Id: ratchet
+Key-Finding: one
+Session-Id: abc
+Key-Finding: two`;
+    const result = parseTrailersMulti(raw);
+    expect(result).toEqual({
+      'Agent-Id': ['ratchet'],
+      'Session-Id': ['abc'],
+      'Key-Finding': ['one', 'two'],
+    });
+  });
+
+  it('returns empty record for empty input', () => {
+    expect(parseTrailersMulti('')).toEqual({});
+  });
+
+  it('skips empty lines and lines without colons', () => {
+    const raw = `Agent-Id: ratchet
+
+no colon here
+Task-Status: COMPLETED`;
+    const result = parseTrailersMulti(raw);
+    expect(Object.keys(result)).toHaveLength(2);
+    expect(result['Agent-Id']).toEqual(['ratchet']);
+    expect(result['Task-Status']).toEqual(['COMPLETED']);
+  });
+
+  it('trims whitespace from keys and values', () => {
+    const raw = '  Agent-Id :  ratchet  ';
+    const result = parseTrailersMulti(raw);
+    expect(result['Agent-Id']).toEqual(['ratchet']);
+  });
+
+  it('preserves order of multiple values for the same key', () => {
+    const raw = `Key-Finding: alpha
+Key-Finding: beta
+Key-Finding: gamma
+Key-Finding: delta`;
+    const result = parseTrailersMulti(raw);
+    expect(result['Key-Finding']).toEqual(['alpha', 'beta', 'gamma', 'delta']);
   });
 });
