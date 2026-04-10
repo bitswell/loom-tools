@@ -19,6 +19,7 @@ import { ciGenerateTool } from './ci-generate.js';
 import { repoInitTool } from './repo-init.js';
 import { complianceCheckTool } from './compliance-check.js';
 import { trailerValidateTool } from './trailer-validate.js';
+import { lifecycleCheckTool } from './lifecycle-check.js';
 
 // Phase 2 exports
 export { commitTool } from './commit.js';
@@ -47,6 +48,8 @@ export { complianceCheckTool, parseOwnerRepo } from './compliance-check.js';
 
 // Protocol-enforcement tools
 export { trailerValidateTool } from './trailer-validate.js';
+export { lifecycleCheckTool, transition } from './lifecycle-check.js';
+export type { TaskStatus, LifecycleState } from './lifecycle-check.js';
 
 /**
  * Create a registry with all built-in LOOM tools registered.
@@ -85,6 +88,7 @@ export function createDefaultRegistry(): ToolRegistry {
 
   // Protocol-enforcement tools (writer + reviewer + orchestrator)
   registry.register(trailerValidateTool);
+  registry.register(lifecycleCheckTool);
 
   return registry;
 }
