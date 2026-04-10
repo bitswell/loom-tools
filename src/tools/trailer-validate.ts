@@ -197,8 +197,50 @@ export const trailerValidateTool: Tool<TrailerValidateIn, TrailerValidateOut> = 
       }
     }
 
+    // ASSIGNED invariants
+    if (taskStatus === 'ASSIGNED') {
+      for (const [trailer, rule] of [
+        ['Assigned-To', 'assigned-to-required'],
+        ['Assignment', 'assignment-required'],
+        ['Scope', 'scope-required'],
+        ['Dependencies', 'dependencies-required'],
+      ] as const) {
+        if (!first(trailers, trailer)) {
+          violations.push({
+            rule,
+            detail: `ASSIGNED commit must have a ${trailer} trailer`,
+            severity: 'error',
+          });
+        }
+      }
+
+      const budget = first(trailers, 'Budget');
+      if (!budget) {
+        violations.push({
+          rule: 'budget-required',
+          detail: 'ASSIGNED commit must have a Budget trailer',
+          severity: 'error',
+        });
+      } else {
+        const n = parseInt(budget, 10);
+        if (isNaN(n) || n <= 0) {
+          violations.push({
+            rule: 'budget-required',
+            detail: `Budget '${budget}' must be a positive integer`,
+            severity: 'error',
+          });
+        }
+      }
+    }
+
     // Heartbeat: if present must match ISO-8601 UTC; if missing on
-    // IMPLEMENTING, warn (or error under strict).
+    // IMPLEMENTING/COMPLETED/BLOCKED/FAILED, warn (or error under strict).
+    const HEARTBEAT_STATES = new Set([
+      'IMPLEMENTING',
+      'COMPLETED',
+      'BLOCKED',
+      'FAILED',
+    ]);
     const heartbeat = first(trailers, 'Heartbeat');
     if (heartbeat !== undefined && !HEARTBEAT_RE.test(heartbeat)) {
       violations.push({
@@ -208,10 +250,14 @@ export const trailerValidateTool: Tool<TrailerValidateIn, TrailerValidateOut> = 
       });
     }
 
-    if (taskStatus === 'IMPLEMENTING' && heartbeat === undefined) {
+    if (
+      taskStatus &&
+      HEARTBEAT_STATES.has(taskStatus) &&
+      heartbeat === undefined
+    ) {
       violations.push({
         rule: 'heartbeat-missing',
-        detail: 'IMPLEMENTING commit should have a Heartbeat trailer',
+        detail: `${taskStatus} commit should have a Heartbeat trailer`,
         severity: strict ? 'error' : 'warn',
       });
     }
