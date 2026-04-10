@@ -28,7 +28,7 @@ export async function startServer(): Promise<void> {
     { capabilities: { tools: {} } },
   );
 
-  registerToolListHandler(server, registry);
+  registerToolListHandler(server, registry, ctx);
   registerToolCallHandler(server, registry, ctx);
 
   const transport = new StdioServerTransport();
@@ -36,15 +36,19 @@ export async function startServer(): Promise<void> {
 }
 
 /**
- * Handle tools/list: return all registered tools with JSON Schema
- * input definitions.
+ * Handle tools/list: return tools accessible to the agent's role,
+ * with JSON Schema input definitions.
+ *
+ * Filters by role so agents only see tools they can actually call.
+ * Avoids wasting LLM tokens on tools that would be rejected.
  */
 function registerToolListHandler(
   server: Server,
   registry: ToolRegistry,
+  ctx: ToolContext,
 ): void {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const tools = registry.all().map((tool) => {
+    const tools = registry.forRole(ctx.role).map((tool) => {
       const def = tool.definition;
       const jsonSchema = zodToJsonSchema(def.inputSchema, {
         target: 'jsonSchema7',

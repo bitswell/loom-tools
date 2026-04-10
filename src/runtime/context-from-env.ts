@@ -30,8 +30,20 @@ export async function contextFromEnv(
     );
   }
 
-  const rawRole = env.LOOM_ROLE ?? 'orchestrator';
-  const role: ProtocolRole = isProtocolRole(rawRole) ? rawRole : 'orchestrator';
+  const rawRole = env.LOOM_ROLE;
+  let role: ProtocolRole;
+  if (!rawRole || rawRole.trim() === '') {
+    // No role set — standalone use, default to orchestrator.
+    role = 'orchestrator';
+  } else if (isProtocolRole(rawRole)) {
+    role = rawRole;
+  } else {
+    // Invalid role value — fail closed to least privilege.
+    process.stderr.write(
+      `warn: LOOM_ROLE '${rawRole}' is not a valid role, defaulting to 'writer'\n`,
+    );
+    role = 'writer';
+  }
 
   const branch = env.LOOM_BRANCH ?? (await inferBranch(worktree));
 

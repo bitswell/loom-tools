@@ -32,9 +32,14 @@ function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
  * child process. This tests the mapping from registry to MCP format.
  */
 describe('tools/list', () => {
-  it('returns all 21 registered tools', () => {
+  it('registry contains all 21 tools', () => {
     const registry = createDefaultRegistry();
-    const tools = registry.all().map((tool) => {
+    expect(registry.all()).toHaveLength(21);
+  });
+
+  it('orchestrator sees all 21 tools', () => {
+    const registry = createDefaultRegistry();
+    const tools = registry.forRole('orchestrator').map((tool) => {
       const def = tool.definition;
       const jsonSchema = zodToJsonSchema(def.inputSchema, {
         target: 'jsonSchema7',
@@ -60,6 +65,38 @@ describe('tools/list', () => {
         'object',
       );
     }
+  });
+
+  it('writer sees fewer tools than orchestrator', () => {
+    const registry = createDefaultRegistry();
+    const writerTools = registry.forRole('writer');
+    const allTools = registry.all();
+
+    expect(writerTools.length).toBeLessThan(allTools.length);
+    expect(writerTools.length).toBeGreaterThan(0);
+
+    // Writer should not see orchestrator-only tools
+    const writerNames = writerTools.map((t) => t.definition.name);
+    expect(writerNames).not.toContain('assign');
+    expect(writerNames).not.toContain('dispatch');
+    expect(writerNames).not.toContain('pr-merge');
+
+    // Writer should see writer-scoped tools
+    expect(writerNames).toContain('commit');
+    expect(writerNames).toContain('push');
+    expect(writerNames).toContain('read-assignment');
+  });
+
+  it('reviewer sees only read-only tools', () => {
+    const registry = createDefaultRegistry();
+    const reviewerTools = registry.forRole('reviewer');
+    const reviewerNames = reviewerTools.map((t) => t.definition.name);
+
+    expect(reviewerNames).toContain('read-assignment');
+    expect(reviewerNames).toContain('status-query');
+    expect(reviewerNames).not.toContain('commit');
+    expect(reviewerNames).not.toContain('push');
+    expect(reviewerNames).not.toContain('assign');
   });
 
   it('includes all known tool names', () => {

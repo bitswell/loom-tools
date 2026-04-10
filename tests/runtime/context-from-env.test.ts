@@ -71,11 +71,25 @@ describe('contextFromEnv', () => {
     expect(ctx.role).toBe('orchestrator');
   });
 
-  it('falls back to orchestrator for invalid role', async () => {
+  it('falls back to writer for invalid role and warns', async () => {
     const ctx = await contextFromEnv({
       LOOM_AGENT_ID: 'test',
       LOOM_SESSION_ID: 'sid',
       LOOM_ROLE: 'superadmin',
+      LOOM_BRANCH: 'main',
+    });
+
+    expect(ctx.role).toBe('writer');
+    expect(stderrSpy).toHaveBeenCalledWith(
+      expect.stringContaining("LOOM_ROLE 'superadmin' is not a valid role"),
+    );
+  });
+
+  it('defaults to orchestrator when LOOM_ROLE is empty string', async () => {
+    const ctx = await contextFromEnv({
+      LOOM_AGENT_ID: 'test',
+      LOOM_SESSION_ID: 'sid',
+      LOOM_ROLE: '',
       LOOM_BRANCH: 'main',
     });
 
