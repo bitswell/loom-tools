@@ -45,7 +45,10 @@ export async function contextFromEnv(
     role = 'writer';
   }
 
-  const branch = env.LOOM_BRANCH ?? (await inferBranch(worktree));
+  // Don't shell out to git during startup — MCP servers may be
+  // sandboxed and unable to spawn child processes. Infer lazily
+  // when a tool handler actually needs ctx.branch.
+  const branch = env.LOOM_BRANCH ?? 'unknown';
 
   const scope = parseCommaSeparated(env.LOOM_SCOPE);
   const scopeDenied = parseCommaSeparated(env.LOOM_SCOPE_DENIED);
