@@ -19,17 +19,25 @@
     "type": "git",
     "url": "https://github.com/bitswell/loom-tools.git"
   },
-  "keywords": ["loom", "agents", "tools", "mcp", "orchestration"],
+  "keywords": [
+    "loom",
+    "agents",
+    "tools",
+    "mcp",
+    "orchestration"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
-    "zod": "^3.25.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.0",
+    "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "typescript": "^5.8.0",
-    "vitest": "^3.1.0",
-    "@types/node": "^22.0.0"
+    "vitest": "^3.1.0"
   }
 }
