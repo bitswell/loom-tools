@@ -82,6 +82,7 @@ describe('trailer-validate tool', () => {
         'Assigned-To': 'ratchet',
         'Assignment': 'do-a-thing',
         'Scope': 'src/tools/**',
+        'Dependencies': 'none',
         'Budget': '60000',
       },
     });
@@ -416,5 +417,295 @@ describe('trailer-validate tool', () => {
     });
     expect(data.ok).toBe(false);
     expect(ruleIds(data.violations)).toContain('failed-error-retryable-bool');
+  });
+
+  // ---------- ASSIGNED-commit rules ----------
+
+  it('P-ASSIGNED: accepts ASSIGNED with all five required trailers', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'task(loom): assigned valid',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc-123',
+        'Task-Status': 'ASSIGNED',
+        'Assigned-To': 'ratchet',
+        'Assignment': 'build-widget',
+        'Scope': 'src/**',
+        'Dependencies': 'none',
+        'Budget': '5000',
+      },
+    });
+    expect(data.ok).toBe(true);
+    expect(data.violations.filter((v) => v.severity === 'error')).toEqual([]);
+  });
+
+  it('N-ASSIGNED: flags missing Assigned-To', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc',
+        'Task-Status': 'ASSIGNED',
+        'Assignment': 'build-widget',
+        'Scope': 'src/**',
+        'Dependencies': 'none',
+        'Budget': '5000',
+      },
+    });
+    expect(data.ok).toBe(false);
+    expect(ruleIds(data.violations)).toContain('assigned-to-required');
+  });
+
+  it('N-ASSIGNED: flags missing Assignment', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc',
+        'Task-Status': 'ASSIGNED',
+        'Assigned-To': 'ratchet',
+        'Scope': 'src/**',
+        'Dependencies': 'none',
+        'Budget': '5000',
+      },
+    });
+    expect(data.ok).toBe(false);
+    expect(ruleIds(data.violations)).toContain('assignment-required');
+  });
+
+  it('N-ASSIGNED: flags missing Scope', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc',
+        'Task-Status': 'ASSIGNED',
+        'Assigned-To': 'ratchet',
+        'Assignment': 'build-widget',
+        'Dependencies': 'none',
+        'Budget': '5000',
+      },
+    });
+    expect(data.ok).toBe(false);
+    expect(ruleIds(data.violations)).toContain('scope-required');
+  });
+
+  it('N-ASSIGNED: flags missing Dependencies', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc',
+        'Task-Status': 'ASSIGNED',
+        'Assigned-To': 'ratchet',
+        'Assignment': 'build-widget',
+        'Scope': 'src/**',
+        'Budget': '5000',
+      },
+    });
+    expect(data.ok).toBe(false);
+    expect(ruleIds(data.violations)).toContain('dependencies-required');
+  });
+
+  it('N-ASSIGNED: flags missing Budget', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc',
+        'Task-Status': 'ASSIGNED',
+        'Assigned-To': 'ratchet',
+        'Assignment': 'build-widget',
+        'Scope': 'src/**',
+        'Dependencies': 'none',
+      },
+    });
+    expect(data.ok).toBe(false);
+    expect(ruleIds(data.violations)).toContain('budget-required');
+  });
+
+  it('N-ASSIGNED: flags negative Budget', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc',
+        'Task-Status': 'ASSIGNED',
+        'Assigned-To': 'ratchet',
+        'Assignment': 'build-widget',
+        'Scope': 'src/**',
+        'Dependencies': 'none',
+        'Budget': '-5',
+      },
+    });
+    expect(data.ok).toBe(false);
+    expect(ruleIds(data.violations)).toContain('budget-required');
+  });
+
+  it('N-ASSIGNED: flags non-integer Budget', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc',
+        'Task-Status': 'ASSIGNED',
+        'Assigned-To': 'ratchet',
+        'Assignment': 'build-widget',
+        'Scope': 'src/**',
+        'Dependencies': 'none',
+        'Budget': 'abc',
+      },
+    });
+    expect(data.ok).toBe(false);
+    expect(ruleIds(data.violations)).toContain('budget-required');
+  });
+
+  // ---------- Terminal-state Heartbeat rules ----------
+
+  it('P-COMPLETED-HB: accepts COMPLETED with Heartbeat', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'task(loom): done',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc-123',
+        'Task-Status': 'COMPLETED',
+        'Files-Changed': '2',
+        'Key-Finding': 'all good',
+        'Heartbeat': '2026-04-08T12:00:00Z',
+      },
+    });
+    expect(data.ok).toBe(true);
+    expect(
+      data.violations.filter((v) => v.rule === 'heartbeat-missing'),
+    ).toEqual([]);
+  });
+
+  it('P-BLOCKED-HB: accepts BLOCKED with Heartbeat', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'task(loom): blocked',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc-123',
+        'Task-Status': 'BLOCKED',
+        'Blocked-Reason': 'waiting on upstream',
+        'Heartbeat': '2026-04-08T12:00:00Z',
+      },
+    });
+    expect(data.ok).toBe(true);
+    expect(
+      data.violations.filter((v) => v.rule === 'heartbeat-missing'),
+    ).toEqual([]);
+  });
+
+  it('P-FAILED-HB: accepts FAILED with Heartbeat', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'task(loom): failed',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc-123',
+        'Task-Status': 'FAILED',
+        'Error-Category': 'internal',
+        'Error-Retryable': 'false',
+        'Heartbeat': '2026-04-08T12:00:00Z',
+      },
+    });
+    expect(data.ok).toBe(true);
+    expect(
+      data.violations.filter((v) => v.rule === 'heartbeat-missing'),
+    ).toEqual([]);
+  });
+
+  it('N-COMPLETED-HB: warns on COMPLETED without Heartbeat (non-strict)', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc',
+        'Task-Status': 'COMPLETED',
+        'Files-Changed': '1',
+        'Key-Finding': 'done',
+      },
+    });
+    expect(data.ok).toBe(true);
+    const missing = data.violations.find(
+      (v) => v.rule === 'heartbeat-missing',
+    );
+    expect(missing).toBeDefined();
+    expect(missing?.severity).toBe('warn');
+  });
+
+  it('N-COMPLETED-HB-STRICT: errors on COMPLETED without Heartbeat (strict)', async () => {
+    const repo = await fresh();
+    const data = await runValidate(
+      repo,
+      {
+        subject: 'test',
+        trailers: {
+          'Agent-Id': 'moss',
+          'Session-Id': 'abc',
+          'Task-Status': 'COMPLETED',
+          'Files-Changed': '1',
+          'Key-Finding': 'done',
+        },
+      },
+      true,
+    );
+    expect(data.ok).toBe(false);
+    const missing = data.violations.find(
+      (v) => v.rule === 'heartbeat-missing',
+    );
+    expect(missing).toBeDefined();
+    expect(missing?.severity).toBe('error');
+  });
+
+  it('N-BLOCKED-HB: warns on BLOCKED without Heartbeat (non-strict)', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc',
+        'Task-Status': 'BLOCKED',
+        'Blocked-Reason': 'waiting',
+      },
+    });
+    expect(data.ok).toBe(true);
+    const missing = data.violations.find(
+      (v) => v.rule === 'heartbeat-missing',
+    );
+    expect(missing).toBeDefined();
+    expect(missing?.severity).toBe('warn');
+  });
+
+  it('N-FAILED-HB: warns on FAILED without Heartbeat (non-strict)', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc',
+        'Task-Status': 'FAILED',
+        'Error-Category': 'blocked',
+        'Error-Retryable': 'true',
+      },
+    });
+    expect(data.ok).toBe(true);
+    const missing = data.violations.find(
+      (v) => v.rule === 'heartbeat-missing',
+    );
+    expect(missing).toBeDefined();
+    expect(missing?.severity).toBe('warn');
   });
 });
