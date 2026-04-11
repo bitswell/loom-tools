@@ -262,6 +262,35 @@ export const trailerValidateTool: Tool<TrailerValidateIn, TrailerValidateOut> = 
       });
     }
 
+    // Scope-Expand: optional, but if present must be `<path> -- <reason>`
+    const scopeExpands = trailers['Scope-Expand'] ?? [];
+    for (const value of scopeExpands) {
+      const sepIdx = value.indexOf('--');
+      if (sepIdx === -1) {
+        violations.push({
+          rule: 'scope-expand-format',
+          detail: `Scope-Expand '${value}' is missing the '--' separator`,
+          severity: 'error',
+        });
+        continue;
+      }
+      const p = value.slice(0, sepIdx).trim();
+      const r = value.slice(sepIdx + 2).trim();
+      if (!p) {
+        violations.push({
+          rule: 'scope-expand-format',
+          detail: `Scope-Expand has empty path: '${value}'`,
+          severity: 'error',
+        });
+      } else if (!r) {
+        violations.push({
+          rule: 'scope-expand-format',
+          detail: `Scope-Expand has empty reason: '${value}'`,
+          severity: 'error',
+        });
+      }
+    }
+
     const hasErrors = violations.some((v) => v.severity === 'error');
     return ok({ ok: !hasErrors, violations });
   },

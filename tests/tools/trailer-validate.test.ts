@@ -708,4 +708,106 @@ describe('trailer-validate tool', () => {
     expect(missing).toBeDefined();
     expect(missing?.severity).toBe('warn');
   });
+
+  // ---------- Scope-Expand format rules ----------
+
+  it('P-SE1: accepts one valid Scope-Expand', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test: scope expand',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc-123',
+        'Scope-Expand': 'src/foo.ts -- needed for type export',
+      },
+    });
+    expect(data.ok).toBe(true);
+    expect(ruleIds(data.violations)).not.toContain('scope-expand-format');
+  });
+
+  it('P-SE2: accepts two valid Scope-Expand trailers', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test: multi scope expand',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc-123',
+        'Scope-Expand': [
+          'src/foo.ts -- needed for type export',
+          'src/bar.ts -- shared utility',
+        ],
+      },
+    });
+    expect(data.ok).toBe(true);
+    expect(ruleIds(data.violations)).not.toContain('scope-expand-format');
+  });
+
+  it('P-SE3: accepts commit with no Scope-Expand (optional)', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test: no scope expand',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc-123',
+      },
+    });
+    expect(data.ok).toBe(true);
+    expect(ruleIds(data.violations)).not.toContain('scope-expand-format');
+  });
+
+  it('N-SE1: flags Scope-Expand without -- separator', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc',
+        'Scope-Expand': 'src/foo.ts',
+      },
+    });
+    expect(data.ok).toBe(false);
+    expect(ruleIds(data.violations)).toContain('scope-expand-format');
+  });
+
+  it('N-SE2: flags Scope-Expand with empty path', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc',
+        'Scope-Expand': ' -- some reason',
+      },
+    });
+    expect(data.ok).toBe(false);
+    expect(ruleIds(data.violations)).toContain('scope-expand-format');
+  });
+
+  it('N-SE3: flags Scope-Expand with empty reason after --', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc',
+        'Scope-Expand': 'src/foo.ts --',
+      },
+    });
+    expect(data.ok).toBe(false);
+    expect(ruleIds(data.violations)).toContain('scope-expand-format');
+  });
+
+  it('N-SE4: flags Scope-Expand with whitespace-only reason', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc',
+        'Scope-Expand': 'src/foo.ts --  ',
+      },
+    });
+    expect(data.ok).toBe(false);
+    expect(ruleIds(data.violations)).toContain('scope-expand-format');
+  });
 });
