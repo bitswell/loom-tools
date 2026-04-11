@@ -21,6 +21,7 @@ import { complianceCheckTool } from './compliance-check.js';
 import { trailerValidateTool } from './trailer-validate.js';
 import { lifecycleCheckTool } from './lifecycle-check.js';
 import { scopeCheckTool } from './scope-check.js';
+import { dagCheckTool } from './dag-check.js';
 
 // Phase 2 exports
 export { commitTool } from './commit.js';
@@ -52,6 +53,7 @@ export { trailerValidateTool } from './trailer-validate.js';
 export { lifecycleCheckTool, transition } from './lifecycle-check.js';
 export type { TaskStatus, LifecycleState } from './lifecycle-check.js';
 export { scopeCheckTool } from './scope-check.js';
+export { dagCheckTool } from './dag-check.js';
 
 /**
  * Create a registry with all built-in LOOM tools registered.
@@ -92,6 +94,7 @@ export function createDefaultRegistry(): ToolRegistry {
   registry.register(trailerValidateTool);
   registry.register(lifecycleCheckTool);
   registry.register(scopeCheckTool);
+  registry.register(dagCheckTool);
 
   return registry;
 }
