@@ -114,6 +114,19 @@ export const trailerValidateTool: Tool<TrailerValidateIn, TrailerValidateOut> = 
       });
     }
 
+    // Task-Status: at most one per commit. The protocol defines exactly one
+    // state per commit; multiple Task-Status trailers are ambiguous and
+    // callers (lifecycle-check, etc.) would silently honor only the first.
+    const taskStatusAll = trailers['Task-Status'] ?? [];
+    if (taskStatusAll.length > 1) {
+      const listed = taskStatusAll.map((v) => `'${v}'`).join(', ');
+      violations.push({
+        rule: 'task-status-single',
+        detail: `Task-Status must appear at most once; found ${taskStatusAll.length}: ${listed}`,
+        severity: 'error',
+      });
+    }
+
     // Task-Status: optional, but if present must be in enum
     const taskStatus = first(trailers, 'Task-Status');
     if (taskStatus && !TASK_STATUS_ENUM.has(taskStatus)) {
