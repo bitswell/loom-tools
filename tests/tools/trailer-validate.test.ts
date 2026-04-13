@@ -385,6 +385,37 @@ describe('trailer-validate tool', () => {
     expect(missing?.severity).toBe('warn');
   });
 
+  it('N14: flags commit with two Task-Status trailers', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc',
+        'Task-Status': ['PLANNING', 'IMPLEMENTING'],
+      },
+    });
+    expect(data.ok).toBe(false);
+    expect(ruleIds(data.violations)).toContain('task-status-single');
+    const v = data.violations.find((x) => x.rule === 'task-status-single');
+    expect(v?.detail).toContain('PLANNING');
+    expect(v?.detail).toContain('IMPLEMENTING');
+  });
+
+  it('N15: flags three Task-Status trailers', async () => {
+    const repo = await fresh();
+    const data = await runValidate(repo, {
+      subject: 'test',
+      trailers: {
+        'Agent-Id': 'moss',
+        'Session-Id': 'abc',
+        'Task-Status': ['ASSIGNED', 'PLANNING', 'COMPLETED'],
+      },
+    });
+    expect(data.ok).toBe(false);
+    expect(ruleIds(data.violations)).toContain('task-status-single');
+  });
+
   // ---------- Adjacent edge cases ----------
 
   it('A1: flags Files-Changed=-1 as non-integer', async () => {

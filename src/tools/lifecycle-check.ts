@@ -237,6 +237,7 @@ export const lifecycleCheckTool: Tool<LifecycleCheckIn, LifecycleCheckOut> = {
         });
       }
 
+      // trailer-validate enforces task-status-single; we trust the first value here.
       const rawStatus = first(trailers, 'Task-Status');
       const status: TaskStatus | undefined =
         rawStatus !== undefined && TASK_STATUS_SET.has(rawStatus)
