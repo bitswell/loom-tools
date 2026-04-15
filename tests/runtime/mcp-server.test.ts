@@ -128,6 +128,7 @@ describe('tools/list', () => {
       'scope-check',
       'dag-check',
       'dispatch-check',
+      'stack-project',
     ];
 
     expect(names.sort()).toEqual(expected.sort());
