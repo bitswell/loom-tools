@@ -12,6 +12,7 @@ import { statusTool } from './status.js';
 import { prCreateTool } from './pr-create.js';
 import { prRetargetTool } from './pr-retarget.js';
 import { prMergeTool } from './pr-merge.js';
+import { stackProjectTool } from './stack-project.js';
 import { reviewRequestTool } from './review-request.js';
 import { submoduleTool } from './submodule.js';
 import { toolRequestTool } from './tool-request.js';
@@ -40,6 +41,7 @@ export { statusTool } from './status.js';
 export { prCreateTool } from './pr-create.js';
 export { prRetargetTool } from './pr-retarget.js';
 export { prMergeTool } from './pr-merge.js';
+export { stackProjectTool } from './stack-project.js';
 export { reviewRequestTool } from './review-request.js';
 export { submoduleTool } from './submodule.js';
 export { toolRequestTool } from './tool-request.js';
@@ -81,6 +83,7 @@ export function createDefaultRegistry(): ToolRegistry {
   registry.register(prCreateTool);
   registry.register(prRetargetTool);
   registry.register(prMergeTool);
+  registry.register(stackProjectTool);
   registry.register(reviewRequestTool);
   registry.register(submoduleTool);
 
