@@ -42,6 +42,25 @@ export const ghPagesEnableTool: Tool<GhPagesEnableIn, GhPagesEnableOut> = {
     );
 
     if (result.exitCode !== 0) {
+      // 409 means Pages is already enabled — treat as success
+      if (result.stderr.includes('409') || result.stderr.includes('already exists')) {
+        const viewResult = await exec(
+          'gh',
+          ['api', `repos/${input.repo}/pages`],
+          cwd,
+        );
+        let url = `https://${input.repo.split('/')[0]}.github.io/${input.repo.split('/')[1]}/`;
+        try {
+          const parsed = JSON.parse(viewResult.stdout);
+          if (parsed.html_url) {
+            url = parsed.html_url;
+          }
+        } catch {
+          // Use the constructed URL if parsing fails
+        }
+        return ok({ url, enabled: true });
+      }
+
       return err('gh-pages-enable-failed', result.stderr.trim(), true);
     }
 

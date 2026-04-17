@@ -105,7 +105,56 @@ describe('gh-pages-enable tool', () => {
     }
   });
 
-  it('returns error when API call fails', async () => {
+  it('treats 409 as success (already enabled)', async () => {
+    mockExec
+      .mockResolvedValueOnce({
+        stdout: '',
+        stderr: 'HTTP 409: Conflict - Pages is already enabled',
+        exitCode: 1,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({ html_url: 'https://bitswell.github.io/loom-site/' }),
+        stderr: '',
+        exitCode: 0,
+      });
+
+    const result = await ghPagesEnableTool.handler(
+      { repo: 'bitswell/loom-site' },
+      makeCtx(),
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.url).toBe('https://bitswell.github.io/loom-site/');
+      expect(result.data.enabled).toBe(true);
+    }
+  });
+
+  it('treats "already exists" as success', async () => {
+    mockExec
+      .mockResolvedValueOnce({
+        stdout: '',
+        stderr: 'already exists',
+        exitCode: 1,
+      })
+      .mockResolvedValueOnce({
+        stdout: '{}',
+        stderr: '',
+        exitCode: 0,
+      });
+
+    const result = await ghPagesEnableTool.handler(
+      { repo: 'org/repo' },
+      makeCtx(),
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.enabled).toBe(true);
+    }
+  });
+
+  it('returns error when API call fails with non-409 error', async () => {
     mockExec.mockResolvedValueOnce({
       stdout: '',
       stderr: 'Not Found',

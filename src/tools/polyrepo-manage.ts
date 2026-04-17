@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { join } from 'node:path';
 import type { Tool } from '../types/tool.js';
 import { ok, err } from '../types/result.js';
 import { exec } from '../util/exec.js';
@@ -128,10 +129,12 @@ export const polyrepoManageTool: Tool<PolyrepoManageIn, PolyrepoManageOut> = {
           return err('git-rm-failed', rmResult.stderr.trim(), true);
         }
 
-        // Remove the .git/modules entry
+        // Remove the .git/modules entry (resolve gitdir for worktree safety)
+        const gitDirResult = await exec('git', ['rev-parse', '--git-dir'], cwd);
+        const gitDir = gitDirResult.exitCode === 0 ? gitDirResult.stdout.trim() : '.git';
         await exec(
           'rm',
-          ['-rf', `.git/modules/${input.path}`],
+          ['-rf', join(gitDir, 'modules', input.path)],
           cwd,
         );
 

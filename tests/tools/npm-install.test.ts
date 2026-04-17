@@ -64,15 +64,47 @@ describe('npm-install tool', () => {
     );
   });
 
-  it('uses custom cwd when provided', async () => {
+  it('resolves relative cwd within worktree', async () => {
     mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
 
     await npmInstallTool.handler(
-      { command: 'install', cwd: '/custom/dir' },
+      { command: 'install', cwd: 'packages/core' },
       makeCtx(),
     );
 
-    expect(mockExec).toHaveBeenCalledWith('npm', ['install'], '/custom/dir');
+    expect(mockExec).toHaveBeenCalledWith(
+      'npm',
+      ['install'],
+      '/tmp/worktree/packages/core',
+    );
+  });
+
+  it('rejects cwd that escapes worktree', async () => {
+    const result = await npmInstallTool.handler(
+      { command: 'install', cwd: '../../etc' },
+      makeCtx(),
+    );
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('scope-violation');
+      expect(result.error.retryable).toBe(false);
+    }
+    // exec should not have been called
+    expect(mockExec).not.toHaveBeenCalled();
+  });
+
+  it('rejects absolute cwd outside worktree', async () => {
+    const result = await npmInstallTool.handler(
+      { command: 'install', cwd: '/etc/passwd' },
+      makeCtx(),
+    );
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('scope-violation');
+    }
+    expect(mockExec).not.toHaveBeenCalled();
   });
 
   it('defaults to worktree when cwd is not provided', async () => {
@@ -136,5 +168,10 @@ describe('npm-install tool', () => {
       const parsed = npmInstallTool.definition.inputSchema.safeParse({ command });
       expect(parsed.success).toBe(true);
     }
+  });
+
+  it('schema describes cwd as relative path within worktree', () => {
+    const cwdProp = npmInstallTool.definition.inputSchema.shape.cwd;
+    expect(cwdProp.description).toContain('within worktree');
   });
 });

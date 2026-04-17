@@ -105,6 +105,7 @@ describe('polyrepo-manage tool', () => {
     mockExec
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })  // deinit
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })  // git rm
+      .mockResolvedValueOnce({ stdout: '/tmp/worktree/.git\n', stderr: '', exitCode: 0 }) // git rev-parse --git-dir
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })  // rm -rf modules
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 }); // submodule status (empty)
 
@@ -117,6 +118,25 @@ describe('polyrepo-manage tool', () => {
     if (result.success) {
       expect(result.data.message).toContain('Removed submodule');
     }
+  });
+
+  it('resolves git-dir for worktree-safe module cleanup', async () => {
+    mockExec
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })  // deinit
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })  // git rm
+      .mockResolvedValueOnce({ stdout: '/home/main-repo/.git/worktrees/wt\n', stderr: '', exitCode: 0 }) // git rev-parse --git-dir
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })  // rm -rf modules
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 }); // submodule status (empty)
+
+    await polyrepoManageTool.handler(
+      { action: 'remove', path: 'repos/old-mod' },
+      makeCtx(),
+    );
+
+    // rm -rf should use the resolved git-dir, not hardcoded .git
+    const rmCall = mockExec.mock.calls[3];
+    expect(rmCall[0]).toBe('rm');
+    expect(rmCall[1][1]).toContain('/home/main-repo/.git/worktrees/wt/modules/repos/old-mod');
   });
 
   it('returns error when remove is missing path', async () => {

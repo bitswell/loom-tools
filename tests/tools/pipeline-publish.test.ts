@@ -43,15 +43,14 @@ describe('pipeline-publish tool', () => {
     mockExec
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // worktree add
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // commit
-      .mockResolvedValueOnce({ stdout: 'retro-sha\n', stderr: '', exitCode: 0 }) // rev-parse
+      .mockResolvedValueOnce({ stdout: 'retro-sha\n', stderr: '', exitCode: 0 }) // rev-parse HEAD
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // push retros
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // notes add
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // push notes
       .mockResolvedValueOnce({ stdout: 'sha\trefs/heads/retros\n', stderr: '', exitCode: 0 }) // ls-remote retros
       .mockResolvedValueOnce({ stdout: 'sha\trefs/notes/pipeline\n', stderr: '', exitCode: 0 }) // ls-remote notes
-      .mockResolvedValueOnce({ stdout: 'status: done\n', stderr: '', exitCode: 0 }) // notes show
-      .mockResolvedValueOnce({ stdout: 'note-sha\n', stderr: '', exitCode: 0 })  // rev-parse notes
-      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });  // worktree remove
+      .mockResolvedValueOnce({ stdout: 'note-sha\n', stderr: '', exitCode: 0 })  // rev-parse notes ref
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });  // worktree remove (finally)
 
     const result = await pipelinePublishTool.handler(baseInput, makeCtx());
 
@@ -76,20 +75,19 @@ describe('pipeline-publish tool', () => {
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // push notes
       .mockResolvedValueOnce({ stdout: 'sha\tretros\n', stderr: '', exitCode: 0 }) // ls-remote retros
       .mockResolvedValueOnce({ stdout: 'sha\trefs/notes/pipeline\n', stderr: '', exitCode: 0 }) // ls-remote notes
-      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // notes show
       .mockResolvedValueOnce({ stdout: 'note-sha\n', stderr: '', exitCode: 0 }) // rev-parse notes
-      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });  // cleanup
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });  // cleanup (finally)
 
     const result = await pipelinePublishTool.handler(baseInput, makeCtx());
 
     expect(result.success).toBe(true);
   });
 
-  it('returns error when retro commit fails', async () => {
+  it('returns error when retro commit fails and cleans up', async () => {
     mockExec
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // worktree add
       .mockResolvedValueOnce({ stdout: '', stderr: 'nothing to commit', exitCode: 1 }) // commit fails
-      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });  // cleanup
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });  // cleanup (finally)
 
     const result = await pipelinePublishTool.handler(baseInput, makeCtx());
 
@@ -105,7 +103,7 @@ describe('pipeline-publish tool', () => {
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // commit
       .mockResolvedValueOnce({ stdout: 'sha\n', stderr: '', exitCode: 0 }) // rev-parse
       .mockResolvedValueOnce({ stdout: '', stderr: 'rejected', exitCode: 1 }) // push fails
-      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });  // cleanup
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });  // cleanup (finally)
 
     const result = await pipelinePublishTool.handler(baseInput, makeCtx());
 
@@ -122,7 +120,7 @@ describe('pipeline-publish tool', () => {
       .mockResolvedValueOnce({ stdout: 'sha\n', stderr: '', exitCode: 0 }) // rev-parse
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // push retros
       .mockResolvedValueOnce({ stdout: '', stderr: 'error: cannot note', exitCode: 1 }) // note fails
-      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });  // cleanup
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });  // cleanup (finally)
 
     const result = await pipelinePublishTool.handler(baseInput, makeCtx());
 
@@ -132,19 +130,39 @@ describe('pipeline-publish tool', () => {
     }
   });
 
+  it('returns error when note ref cannot be resolved', async () => {
+    mockExec
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // worktree
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // commit
+      .mockResolvedValueOnce({ stdout: 'sha\n', stderr: '', exitCode: 0 }) // rev-parse HEAD
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // push retros
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // notes add
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // push notes
+      .mockResolvedValueOnce({ stdout: 'sha\tretros\n', stderr: '', exitCode: 0 }) // ls-remote retros
+      .mockResolvedValueOnce({ stdout: 'sha\tnotes\n', stderr: '', exitCode: 0 }) // ls-remote notes
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 1 })   // rev-parse notes fails
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });  // cleanup (finally)
+
+    const result = await pipelinePublishTool.handler(baseInput, makeCtx());
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('note-ref-resolve-failed');
+    }
+  });
+
   it('returns error when verification fails', async () => {
     mockExec
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // worktree
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // commit
-      .mockResolvedValueOnce({ stdout: 'sha\n', stderr: '', exitCode: 0 }) // rev-parse
+      .mockResolvedValueOnce({ stdout: 'sha\n', stderr: '', exitCode: 0 }) // rev-parse HEAD
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // push retros
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // notes add
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // push notes
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // ls-remote retros (empty = no match)
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // ls-remote notes (empty)
-      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // notes show
-      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 1 })   // rev-parse notes fails
-      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });  // cleanup
+      .mockResolvedValueOnce({ stdout: 'note-sha\n', stderr: '', exitCode: 0 }) // rev-parse notes ok
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });  // cleanup (finally)
 
     const result = await pipelinePublishTool.handler(baseInput, makeCtx());
 
@@ -164,7 +182,6 @@ describe('pipeline-publish tool', () => {
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // push notes
       .mockResolvedValueOnce({ stdout: 'sha\tretros\n', stderr: '', exitCode: 0 })
       .mockResolvedValueOnce({ stdout: 'sha\tnotes\n', stderr: '', exitCode: 0 })
-      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })
       .mockResolvedValueOnce({ stdout: 'sha\n', stderr: '', exitCode: 0 })
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });  // cleanup
 
@@ -192,7 +209,6 @@ describe('pipeline-publish tool', () => {
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // push notes
       .mockResolvedValueOnce({ stdout: 'sha\tretros\n', stderr: '', exitCode: 0 })
       .mockResolvedValueOnce({ stdout: 'sha\tnotes\n', stderr: '', exitCode: 0 })
-      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })
       .mockResolvedValueOnce({ stdout: 'sha\n', stderr: '', exitCode: 0 })
       .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
 
@@ -209,8 +225,35 @@ describe('pipeline-publish tool', () => {
     expect(noteMsg).toContain('outcome: merged');
   });
 
+  it('uses tmpdir for worktree path, not cwd', async () => {
+    mockExec
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // worktree add
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })   // commit
+      .mockResolvedValueOnce({ stdout: 'sha\n', stderr: '', exitCode: 0 })
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })
+      .mockResolvedValueOnce({ stdout: 'sha\tretros\n', stderr: '', exitCode: 0 })
+      .mockResolvedValueOnce({ stdout: 'sha\tnotes\n', stderr: '', exitCode: 0 })
+      .mockResolvedValueOnce({ stdout: 'sha\n', stderr: '', exitCode: 0 })
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+
+    await pipelinePublishTool.handler(baseInput, makeCtx());
+
+    // worktree add path should be in tmpdir, not agent's worktree
+    const worktreeAddCall = mockExec.mock.calls[0];
+    const worktreePathArg = (worktreeAddCall[1] as string[])[2]; // 'git worktree add <path> retros'
+    expect(worktreePathArg).not.toContain('/tmp/worktree/.loom');
+    expect(worktreePathArg).toMatch(/loom-retros-/);
+  });
+
   it('is scoped to orchestrator role only', () => {
     expect(pipelinePublishTool.definition.roles).toEqual(['orchestrator']);
+  });
+
+  it('noteSha output description mentions ref tip', () => {
+    const noteShaProp = pipelinePublishTool.definition.outputSchema.shape.noteSha;
+    expect(noteShaProp.description).toContain('ref tip');
   });
 
   it('schema rejects missing issueSha', () => {
