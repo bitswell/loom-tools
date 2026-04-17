@@ -38,7 +38,7 @@ export const npmInstallTool: Tool<NpmInstallIn, NpmInstallOut> = {
     const targetDir = input.cwd ? resolve(ctx.worktree, input.cwd) : ctx.worktree;
 
     // Validate cwd is within the worktree to prevent scope escape
-    if (!targetDir.startsWith(ctx.worktree)) {
+    if (targetDir !== ctx.worktree && !targetDir.startsWith(ctx.worktree + '/')) {
       return err('scope-violation', `cwd must be within worktree: ${ctx.worktree}`, false);
     }
 

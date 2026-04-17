@@ -130,7 +130,7 @@ export const polyrepoManageTool: Tool<PolyrepoManageIn, PolyrepoManageOut> = {
         }
 
         // Remove the .git/modules entry (resolve gitdir for worktree safety)
-        const gitDirResult = await exec('git', ['rev-parse', '--git-dir'], cwd);
+        const gitDirResult = await exec('git', ['rev-parse', '--git-common-dir'], cwd);
         const gitDir = gitDirResult.exitCode === 0 ? gitDirResult.stdout.trim() : '.git';
         await exec(
           'rm',

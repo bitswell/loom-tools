@@ -107,6 +107,20 @@ describe('npm-install tool', () => {
     expect(mockExec).not.toHaveBeenCalled();
   });
 
+  it('rejects cwd that is a prefix collision with worktree', async () => {
+    const result = await npmInstallTool.handler(
+      { command: 'install', cwd: '/tmp/worktree-evil' },
+      makeCtx(),
+    );
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('scope-violation');
+      expect(result.error.retryable).toBe(false);
+    }
+    expect(mockExec).not.toHaveBeenCalled();
+  });
+
   it('defaults to worktree when cwd is not provided', async () => {
     mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
 
