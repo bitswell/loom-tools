@@ -23,6 +23,11 @@ import { lifecycleCheckTool } from './lifecycle-check.js';
 import { scopeCheckTool } from './scope-check.js';
 import { dagCheckTool } from './dag-check.js';
 import { dispatchCheckTool } from './dispatch-check.js';
+import { npmInstallTool } from './npm-install.js';
+import { repoCreateTool } from './repo-create.js';
+import { ghPagesEnableTool } from './gh-pages-enable.js';
+import { polyrepoManageTool } from './polyrepo-manage.js';
+import { pipelinePublishTool } from './pipeline-publish.js';
 
 // Phase 2 exports
 export { commitTool } from './commit.js';
@@ -56,6 +61,13 @@ export type { TaskStatus, LifecycleState } from './lifecycle-check.js';
 export { scopeCheckTool } from './scope-check.js';
 export { dagCheckTool } from './dag-check.js';
 export { dispatchCheckTool } from './dispatch-check.js';
+
+// Phase 5 — requested tools
+export { npmInstallTool } from './npm-install.js';
+export { repoCreateTool } from './repo-create.js';
+export { ghPagesEnableTool } from './gh-pages-enable.js';
+export { polyrepoManageTool } from './polyrepo-manage.js';
+export { pipelinePublishTool } from './pipeline-publish.js';
 
 /**
  * Create a registry with all built-in LOOM tools registered.
@@ -98,6 +110,13 @@ export function createDefaultRegistry(): ToolRegistry {
   registry.register(scopeCheckTool);
   registry.register(dagCheckTool);
   registry.register(dispatchCheckTool);
+
+  // Phase 5 — requested tools
+  registry.register(npmInstallTool);
+  registry.register(repoCreateTool);
+  registry.register(ghPagesEnableTool);
+  registry.register(polyrepoManageTool);
+  registry.register(pipelinePublishTool);
 
   return registry;
 }
