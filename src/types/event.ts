@@ -6,6 +6,7 @@ export type EventType =
   | 'agent-completed'
   | 'agent-failed'
   | 'tool-requested'
+  | 'tool-request-push-failed'
   | 'review-submitted'
   | 'scope-violation';
 

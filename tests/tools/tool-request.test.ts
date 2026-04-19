@@ -23,6 +23,33 @@ function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
   };
 }
 
+/**
+ * Stage the six git calls of the non-blocking happy path:
+ * fetch / rev-parse / hash-object / commit-tree / update-ref / push.
+ *
+ * Pass an empty `parent` to simulate an orphan creation.
+ */
+function stageHappyPath(parent: string, newSha: string): void {
+  mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+  mockExec.mockResolvedValueOnce(
+    parent
+      ? { stdout: `${parent}\n`, stderr: '', exitCode: 0 }
+      : { stdout: '', stderr: 'unknown ref', exitCode: 1 },
+  );
+  mockExec.mockResolvedValueOnce({
+    stdout: '4b825dc642cb6eb9a060e54bf8d69288fbee4904\n',
+    stderr: '',
+    exitCode: 0,
+  });
+  mockExec.mockResolvedValueOnce({
+    stdout: `${newSha}\n`,
+    stderr: '',
+    exitCode: 0,
+  });
+  mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+  mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+}
+
 describe('tool-request tool', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -33,10 +60,8 @@ describe('tool-request tool', () => {
     vi.useRealTimers();
   });
 
-  it('creates a commit with Tool-Requested trailer (non-blocking)', async () => {
-    mockExec
-      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 }) // commit
-      .mockResolvedValueOnce({ stdout: 'req-sha\n', stderr: '', exitCode: 0 }); // rev-parse
+  it('returns commitSha from commit-tree (orphan creation)', async () => {
+    stageHappyPath('', 'new-sha');
 
     const ctx = makeCtx();
     const result = await toolRequestTool.handler(
@@ -47,30 +72,69 @@ describe('tool-request tool', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.requested).toBe('deploy');
-      expect(result.data.commitSha).toBe('req-sha');
+      expect(result.data.commitSha).toBe('new-sha');
       expect(result.data.fulfilled).toBe(false);
     }
+
+    const commitTreeArgs = mockExec.mock.calls[3][1];
+    expect(commitTreeArgs[0]).toBe('commit-tree');
+    expect(commitTreeArgs).not.toContain('-p');
+
+    const updateArgs = mockExec.mock.calls[4][1];
+    expect(updateArgs[0]).toBe('update-ref');
+    expect(updateArgs[1]).toBe('refs/heads/tool-requests');
+    expect(updateArgs[3]).toBe('0'.repeat(40));
   });
 
-  it('includes Tool-Requested trailer in commit args', async () => {
-    mockExec
-      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })
-      .mockResolvedValueOnce({ stdout: 'sha\n', stderr: '', exitCode: 0 });
+  it('uses existing tip as parent when ref exists', async () => {
+    stageHappyPath('parent-sha', 'new-sha');
 
     await toolRequestTool.handler(
       { toolName: 'deploy', reason: 'need it' },
       makeCtx(),
     );
 
-    const commitArgs = mockExec.mock.calls[0][1];
-    expect(commitArgs.join(' ')).toContain('Tool-Requested: deploy');
-    expect(commitArgs).toContain('--allow-empty');
+    const commitTreeArgs = mockExec.mock.calls[3][1];
+    const pIdx = commitTreeArgs.indexOf('-p');
+    expect(pIdx).toBeGreaterThan(-1);
+    expect(commitTreeArgs[pIdx + 1]).toBe('parent-sha');
+
+    const updateArgs = mockExec.mock.calls[4][1];
+    expect(updateArgs[3]).toBe('parent-sha');
   });
 
-  it('emits tool-requested event', async () => {
-    mockExec
-      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })
-      .mockResolvedValueOnce({ stdout: 'sha\n', stderr: '', exitCode: 0 });
+  it('embeds required trailers in commit message', async () => {
+    stageHappyPath('', 'sha');
+
+    await toolRequestTool.handler(
+      { toolName: 'deploy', reason: 'need it' },
+      makeCtx({ agentId: 'moss', sessionId: 'sess-123' }),
+    );
+
+    const commitTreeArgs = mockExec.mock.calls[3][1];
+    const mIdx = commitTreeArgs.indexOf('-m');
+    const message = commitTreeArgs[mIdx + 1];
+    expect(message).toContain('Agent-Id: moss');
+    expect(message).toContain('Session-Id: sess-123');
+    expect(message).toContain('Tool-Requested: deploy');
+    expect(message).toMatch(/Heartbeat: \d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('never invokes `git commit` against the caller worktree', async () => {
+    stageHappyPath('', 'sha');
+
+    await toolRequestTool.handler(
+      { toolName: 'deploy', reason: 'need it' },
+      makeCtx(),
+    );
+
+    for (const call of mockExec.mock.calls) {
+      expect(call[1][0]).not.toBe('commit');
+    }
+  });
+
+  it('emits tool-requested event with commitSha', async () => {
+    stageHappyPath('', 'new-sha');
 
     const ctx = makeCtx();
     await toolRequestTool.handler(
@@ -84,16 +148,80 @@ describe('tool-request tool', () => {
         payload: expect.objectContaining({
           toolName: 'deploy',
           reason: 'staging deploy',
+          commitSha: 'new-sha',
         }),
       }),
     );
   });
 
-  it('polls for Tool-Provided when blocking', async () => {
-    // Commit and rev-parse for the request
-    mockExec
-      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })
-      .mockResolvedValueOnce({ stdout: 'sha\n', stderr: '', exitCode: 0 });
+  it('emits tool-request-push-failed on push failure but still returns ok', async () => {
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: 'x', exitCode: 1 });
+    mockExec.mockResolvedValueOnce({
+      stdout: '4b825dc642cb6eb9a060e54bf8d69288fbee4904\n',
+      stderr: '',
+      exitCode: 0,
+    });
+    mockExec.mockResolvedValueOnce({
+      stdout: 'req-sha\n',
+      stderr: '',
+      exitCode: 0,
+    });
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+    mockExec.mockResolvedValueOnce({
+      stdout: '',
+      stderr: 'fatal: unable to access origin',
+      exitCode: 128,
+    });
+
+    const ctx = makeCtx();
+    const result = await toolRequestTool.handler(
+      { toolName: 'deploy', reason: 'offline test' },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.commitSha).toBe('req-sha');
+    }
+    expect(ctx.emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'tool-request-push-failed',
+        payload: expect.objectContaining({
+          toolName: 'deploy',
+          commitSha: 'req-sha',
+        }),
+      }),
+    );
+  });
+
+  it('returns error when commit-tree fails', async () => {
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: 'x', exitCode: 1 });
+    mockExec.mockResolvedValueOnce({
+      stdout: '4b825dc642cb6eb9a060e54bf8d69288fbee4904\n',
+      stderr: '',
+      exitCode: 0,
+    });
+    mockExec.mockResolvedValueOnce({
+      stdout: '',
+      stderr: 'commit-tree error',
+      exitCode: 128,
+    });
+
+    const result = await toolRequestTool.handler(
+      { toolName: 'deploy', reason: 'need it' },
+      makeCtx(),
+    );
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('commit-tree-failed');
+    }
+  });
+
+  it('blocking poll resolves fulfilled=true on matching Tool-Request-Sha', async () => {
+    stageHappyPath('', 'req-sha');
 
     const promise = toolRequestTool.handler(
       {
@@ -106,17 +234,21 @@ describe('tool-request tool', () => {
       makeCtx(),
     );
 
-    // First poll: not yet provided
+    // First poll: a commit that is Tool-Requested only — no fulfillment.
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
     mockExec.mockResolvedValueOnce({
-      stdout: 'Tool-Requested: deploy\n',
+      stdout:
+        'some-other-sha\x00Agent-Id: other\nTool-Requested: other\n\x1e',
       stderr: '',
       exitCode: 0,
     });
     await vi.advanceTimersByTimeAsync(100);
 
-    // Second poll: provided
+    // Second poll: fulfillment landed.
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
     mockExec.mockResolvedValueOnce({
-      stdout: 'Tool-Provided: deploy\n',
+      stdout:
+        'fulfill-sha\x00Tool-Provided: deploy\nTool-Request-Sha: req-sha\n\x1e',
       stderr: '',
       exitCode: 0,
     });
@@ -129,17 +261,40 @@ describe('tool-request tool', () => {
     }
   });
 
-  it('times out when blocking and tool not provided', async () => {
-    mockExec
-      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 })
-      .mockResolvedValueOnce({ stdout: 'sha\n', stderr: '', exitCode: 0 });
+  it('blocking poll ignores fulfillment for a different request sha', async () => {
+    stageHappyPath('', 'req-sha');
 
-    // Always return non-provided
+    const promise = toolRequestTool.handler(
+      {
+        toolName: 'deploy',
+        reason: 'need it',
+        blocking: true,
+        pollIntervalMs: 100,
+        timeoutMs: 300,
+      },
+      makeCtx(),
+    );
+
     mockExec.mockResolvedValue({
-      stdout: 'Tool-Requested: deploy\n',
+      stdout:
+        'x\x00Tool-Provided: deploy\nTool-Request-Sha: other-sha\n\x1e',
       stderr: '',
       exitCode: 0,
     });
+
+    await vi.advanceTimersByTimeAsync(400);
+
+    const result = await promise;
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.fulfilled).toBe(false);
+    }
+  });
+
+  it('times out when blocking and no fulfillment arrives', async () => {
+    stageHappyPath('', 'req-sha');
+
+    mockExec.mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
 
     const promise = toolRequestTool.handler(
       {
@@ -161,25 +316,7 @@ describe('tool-request tool', () => {
     }
   });
 
-  it('returns error when commit fails', async () => {
-    mockExec.mockResolvedValueOnce({
-      stdout: '',
-      stderr: 'commit error',
-      exitCode: 1,
-    });
-
-    const result = await toolRequestTool.handler(
-      { toolName: 'deploy', reason: 'need it' },
-      makeCtx(),
-    );
-
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.code).toBe('commit-failed');
-    }
-  });
-
-  it('is accessible to all roles', () => {
+  it('is accessible to writer, reviewer, orchestrator', () => {
     expect(toolRequestTool.definition.roles).toEqual([
       'writer',
       'reviewer',
