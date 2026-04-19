@@ -6,22 +6,19 @@ import { exec } from '../util/exec.js';
 const NO_NEWLINES = /^[^\n\r]*$/;
 const NO_NEWLINES_MSG = 'must not contain newlines or carriage returns';
 const SafeString = z.string().regex(NO_NEWLINES, NO_NEWLINES_MSG);
-const HEX_SHA = /^[0-9a-f]+$/i;
+const HEX_SHA = /^[0-9a-f]{7,40}$/i;
 
 const SubmoduleBumpInput = z.object({
   submodulePath: SafeString.describe(
     'Path of the submodule inside the parent repo, e.g. repos/bitswell/loom-tools.',
   ),
-  targetSha: SafeString.regex(HEX_SHA, 'must be a hex commit SHA').describe(
-    'Full or short commit SHA to bump the submodule to.',
+  targetSha: SafeString.regex(HEX_SHA, 'must be a 7-40 char hex commit SHA').describe(
+    'Full commit SHA (7-40 hex) to bump the submodule to.',
   ),
   remoteUrl: SafeString.optional().describe(
     'Override the upstream URL to fetch from. Defaults to the URL in .gitmodules.',
   ),
-  parentDir: z
-    .string()
-    .optional()
-    .describe('Parent repo root. Defaults to cwd.'),
+  parentDir: SafeString.optional().describe('Parent repo root. Defaults to cwd.'),
 });
 
 const SubmoduleBumpOutput = z.object({
@@ -160,7 +157,7 @@ export const submoduleBumpTool: Tool<SubmoduleBumpIn, SubmoduleBumpOut> = {
       submodulePath,
       previousSha,
       targetSha: resolvedSha,
-      staged: true,
+      staged: previousSha !== resolvedSha,
     });
   },
 };

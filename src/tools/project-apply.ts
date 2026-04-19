@@ -40,12 +40,37 @@ const ProjectApplyOutput = z.object({
 type ProjectApplyIn = z.infer<typeof ProjectApplyInput>;
 type ProjectApplyOut = z.infer<typeof ProjectApplyOutput>;
 
-function validateRelPath(relPath: string): string | null {
-  if (relPath.length === 0) return 'empty path';
-  if (path.isAbsolute(relPath)) return 'absolute paths not allowed';
-  const segments = relPath.split(/[/\\]/);
-  if (segments.some((s) => s === '..')) return 'parent segments not allowed';
-  return null;
+/**
+ * Validate and normalize a relative input path.
+ *
+ * Returns [null, errorMessage] on rejection, [normalized, null] on success.
+ * Normalization strips redundant `.` segments and `//`; rejects absolute
+ * paths, `..` segments, empty keys, `.`, and embedded NUL.
+ */
+function normalizeRelPath(
+  relPath: string,
+): [string | null, string | null] {
+  if (relPath.length === 0) return [null, 'empty path'];
+  if (relPath.includes('\u0000')) return [null, 'null byte in path'];
+  if (path.isAbsolute(relPath)) return [null, 'absolute paths not allowed'];
+
+  // Reject any '..' segment in the raw input — even if a subsequent
+  // normalize would cancel it. A caller that wrote 'a/../b' expressed
+  // intent we do not want to honor silently.
+  const rawSegments = relPath.split(/[/\\]/);
+  if (rawSegments.some((s) => s === '..')) {
+    return [null, 'parent segments not allowed'];
+  }
+
+  // Normalize on posix semantics so reports are stable across platforms
+  // and leading "./" is dropped. After the .. guard above, this only
+  // collapses '.' and '//' — it cannot produce escape.
+  const normalized = path.posix.normalize(relPath.replace(/\\/g, '/'));
+
+  if (normalized === '.' || normalized === '') {
+    return [null, 'path resolves to baseDir itself'];
+  }
+  return [normalized, null];
 }
 
 async function fileExists(abs: string): Promise<boolean> {
@@ -83,13 +108,23 @@ export const projectApplyTool: Tool<ProjectApplyIn, ProjectApplyOut> = {
     const dryRun = safe.dryRun ?? false;
     const force = safe.force ?? false;
 
+    // Resolve the canonical baseDir once so every target comparison is
+    // against the real, symlink-followed path.
+    let realBaseDir: string;
+    try {
+      realBaseDir = await fs.realpath(baseDir);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return err('invalid-basedir', msg, false);
+    }
+
     const applied: string[] = [];
     const skipped: { path: string; reason: 'exists' | 'dry-run' }[] = [];
 
-    for (const [relPath, content] of Object.entries(safe.files)) {
-      const why = validateRelPath(relPath);
-      if (why !== null) {
-        return err('invalid-path', `${relPath}: ${why}`, false);
+    for (const [rawPath, content] of Object.entries(safe.files)) {
+      const [relPath, why] = normalizeRelPath(rawPath);
+      if (relPath === null) {
+        return err('invalid-path', `${rawPath}: ${why}`, false);
       }
 
       if (dryRun) {
@@ -97,25 +132,43 @@ export const projectApplyTool: Tool<ProjectApplyIn, ProjectApplyOut> = {
         continue;
       }
 
-      const target = path.resolve(baseDir, relPath);
-      if (target !== baseDir && !target.startsWith(baseDir + path.sep)) {
-        return err(
-          'path-escape',
-          `${relPath}: resolved target escapes baseDir`,
-          false,
-        );
-      }
+      const target = path.resolve(realBaseDir, relPath);
+      const parent = path.dirname(target);
 
-      if (!force && (await fileExists(target))) {
-        skipped.push({ path: relPath, reason: 'exists' });
-        continue;
-      }
+      try {
+        await fs.mkdir(parent, { recursive: true });
 
-      await fs.mkdir(path.dirname(target), { recursive: true });
-      await fs.writeFile(target, content, 'utf8');
-      applied.push(relPath);
+        // Defense against symlink-based escape: after mkdir, confirm the
+        // resolved parent still sits under realBaseDir. A symlink placed
+        // inside baseDir by an earlier apply or external tool is a write
+        // into whatever the link points to otherwise.
+        const realParent = await fs.realpath(parent);
+        if (
+          realParent !== realBaseDir &&
+          !realParent.startsWith(realBaseDir + path.sep)
+        ) {
+          return err(
+            'path-escape',
+            `${rawPath}: resolves outside baseDir`,
+            false,
+          );
+        }
+
+        const realTarget = path.join(realParent, path.basename(target));
+
+        if (!force && (await fileExists(realTarget))) {
+          skipped.push({ path: relPath, reason: 'exists' });
+          continue;
+        }
+
+        await fs.writeFile(realTarget, content, 'utf8');
+        applied.push(relPath);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return err('write-failed', `${rawPath}: ${msg}`, false);
+      }
     }
 
-    return ok({ baseDir, applied, skipped });
+    return ok({ baseDir: realBaseDir, applied, skipped });
   },
 };

@@ -242,4 +242,75 @@ describe('submodule-bump tool', () => {
     if (result.success) return;
     expect(result.error.code).toBe('invalid-input');
   });
+
+  // --- F6: staged flag is honest on no-op bump ---
+  it('F6: reports staged=false when bumping to the same SHA', async () => {
+    const { inner, outer, submodulePath, cleanup } = await makePair();
+    try {
+      const first = await submoduleBumpTool.handler(
+        { submodulePath, targetSha: inner.shaB, parentDir: outer.path },
+        makeCtx(),
+      );
+      expect(first.success).toBe(true);
+      if (!first.success) return;
+      expect(first.data.staged).toBe(true);
+      await git(outer.path, ['commit', '-m', 'bump to B']);
+
+      const second = await submoduleBumpTool.handler(
+        { submodulePath, targetSha: inner.shaB, parentDir: outer.path },
+        makeCtx(),
+      );
+      expect(second.success).toBe(true);
+      if (!second.success) return;
+      expect(second.data.previousSha).toBe(inner.shaB);
+      expect(second.data.targetSha).toBe(inner.shaB);
+      expect(second.data.staged).toBe(false);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  // --- F7: too-short SHA rejected at the boundary ---
+  it('F7: rejects a 1-char hex "sha"', async () => {
+    const result = await submoduleBumpTool.handler(
+      {
+        submodulePath: 'deps/inner',
+        targetSha: 'a',
+        parentDir: '/tmp',
+      },
+      makeCtx(),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('invalid-input');
+  });
+
+  it('F7: rejects a 6-char hex "sha" (below minimum)', async () => {
+    const result = await submoduleBumpTool.handler(
+      {
+        submodulePath: 'deps/inner',
+        targetSha: 'abcdef',
+        parentDir: '/tmp',
+      },
+      makeCtx(),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('invalid-input');
+  });
+
+  // --- F8: newline in parentDir rejected at the boundary ---
+  it('F8: rejects newline in parentDir', async () => {
+    const result = await submoduleBumpTool.handler(
+      {
+        submodulePath: 'deps/inner',
+        targetSha: 'deadbeef',
+        parentDir: '/tmp\nhack',
+      },
+      makeCtx(),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('invalid-input');
+  });
 });

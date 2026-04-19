@@ -45,7 +45,7 @@ describe('project-apply tool', () => {
 
     expect(result.data.applied).toEqual(['a.txt']);
     expect(result.data.skipped).toEqual([]);
-    expect(result.data.baseDir).toBe(path.resolve(tmp));
+    expect(result.data.baseDir).toBe(await fs.realpath(tmp));
 
     const content = await fs.readFile(path.join(tmp, 'a.txt'), 'utf8');
     expect(content).toBe('hello');
@@ -205,5 +205,104 @@ describe('project-apply tool', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(path.isAbsolute(result.data.baseDir)).toBe(true);
+  });
+
+  // --- F1: symlink-based escape ---
+  it('F1: refuses writes through a symlink that escapes baseDir', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'project-apply-out-'));
+    try {
+      await fs.symlink(outside, path.join(tmp, 'escape'));
+
+      const result = await projectApplyTool.handler(
+        { files: { 'escape/gotcha.txt': 'pwned' }, baseDir: tmp },
+        makeCtx(),
+      );
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect(result.error.code).toBe('path-escape');
+
+      const entries = await fs.readdir(outside);
+      expect(entries).toEqual([]);
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  // --- F1: intra-baseDir symlinks (not escaping) are permitted ---
+  it('F1: allows writes through a symlink that stays inside baseDir', async () => {
+    await fs.mkdir(path.join(tmp, 'real'));
+    await fs.symlink(path.join(tmp, 'real'), path.join(tmp, 'via-link'));
+
+    const result = await projectApplyTool.handler(
+      { files: { 'via-link/x.txt': 'ok' }, baseDir: tmp },
+      makeCtx(),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.applied).toEqual(['via-link/x.txt']);
+
+    const content = await fs.readFile(path.join(tmp, 'real', 'x.txt'), 'utf8');
+    expect(content).toBe('ok');
+  });
+
+  // --- F2: FS errors return structured err instead of crashing ---
+  it('F2: force-over-directory returns write-failed, not a crash', async () => {
+    await fs.mkdir(path.join(tmp, 'collide'));
+
+    const result = await projectApplyTool.handler(
+      { files: { collide: 'x' }, baseDir: tmp, force: true },
+      makeCtx(),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('write-failed');
+    expect(result.error.retryable).toBe(false);
+  });
+
+  // --- F2: null byte in filename is rejected, not crashed on ---
+  it('F2: rejects NUL in filename as invalid-path', async () => {
+    const result = await projectApplyTool.handler(
+      { files: { 'bad\u0000name.txt': 'x' }, baseDir: tmp },
+      makeCtx(),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('invalid-path');
+  });
+
+  // --- F4: leading './' is normalized in reports ---
+  it('F4: normalizes leading "./" in applied/skipped', async () => {
+    const result = await projectApplyTool.handler(
+      { files: { './sub/x.txt': 'hi' }, baseDir: tmp },
+      makeCtx(),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.applied).toEqual(['sub/x.txt']);
+
+    const content = await fs.readFile(path.join(tmp, 'sub', 'x.txt'), 'utf8');
+    expect(content).toBe('hi');
+  });
+
+  // --- F4: "." resolves to baseDir itself and is rejected ---
+  it('F4: rejects "." (baseDir itself)', async () => {
+    const result = await projectApplyTool.handler(
+      { files: { '.': 'x' }, baseDir: tmp },
+      makeCtx(),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('invalid-path');
+  });
+
+  // --- Test gap: stable ordering for numeric-ish keys ---
+  it('preserves insertion order for applied/skipped across numeric keys', async () => {
+    const result = await projectApplyTool.handler(
+      { files: { '1': 'one', '2': 'two', '3': 'three' }, baseDir: tmp },
+      makeCtx(),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.applied).toEqual(['1', '2', '3']);
   });
 });
