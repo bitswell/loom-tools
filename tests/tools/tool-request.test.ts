@@ -23,21 +23,72 @@ function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
   };
 }
 
+const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
+// Synthetic 40-char hex shas — ls-remote parsing demands real-looking hex.
+const FAKE_NEW_SHA = '1111111111111111111111111111111111111111';
+const FAKE_PARENT_SHA = '2222222222222222222222222222222222222222';
+const FAKE_ORIGIN_SHA = '3333333333333333333333333333333333333333';
+const FAKE_LOCAL_SHA = '4444444444444444444444444444444444444444';
+const FAKE_REQ_SHA = '5555555555555555555555555555555555555555';
+const FAKE_SAME_SHA = '6666666666666666666666666666666666666666';
+
 /**
- * Stage the six git calls of the non-blocking happy path:
- * fetch / rev-parse / hash-object / commit-tree / update-ref / push.
+ * Stage the non-blocking happy path when origin lacks the ref and
+ * there is no local tip (full orphan).
  *
- * Pass an empty `parent` to simulate an orphan creation.
+ * Calls:
+ *   0. ls-remote → exit 2 (no ref on origin)
+ *   1. rev-parse --verify --quiet (readLocalTip) → exit 1
+ *   2. hash-object → tree sha
+ *   3. commit-tree → newSha
+ *   4. update-ref → ok
+ *   5. push → ok
  */
-function stageHappyPath(parent: string, newSha: string): void {
-  mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
-  mockExec.mockResolvedValueOnce(
-    parent
-      ? { stdout: `${parent}\n`, stderr: '', exitCode: 0 }
-      : { stdout: '', stderr: 'unknown ref', exitCode: 1 },
-  );
+function stageOrphanPath(newSha: string): void {
+  mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 2 });
+  mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 1 });
   mockExec.mockResolvedValueOnce({
-    stdout: '4b825dc642cb6eb9a060e54bf8d69288fbee4904\n',
+    stdout: `${EMPTY_TREE_SHA}\n`,
+    stderr: '',
+    exitCode: 0,
+  });
+  mockExec.mockResolvedValueOnce({
+    stdout: `${newSha}\n`,
+    stderr: '',
+    exitCode: 0,
+  });
+  mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+  mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+}
+
+/**
+ * Stage the non-blocking happy path when origin has the ref AND local
+ * already matches origin (equal case — no fetch, no merge-base).
+ *
+ * parentSha MUST be 40-char hex (ls-remote stdout sha-format check).
+ *
+ * Calls:
+ *   0. ls-remote → exit 0, sha
+ *   1. rev-parse (readLocalTip) → same sha
+ *   2. hash-object → tree sha
+ *   3. commit-tree → newSha
+ *   4. update-ref → ok
+ *   5. push → ok
+ */
+function stageParentedPath(parentSha: string, newSha: string): void {
+  mockExec.mockResolvedValueOnce({
+    stdout: `${parentSha}\trefs/heads/tool-requests\n`,
+    stderr: '',
+    exitCode: 0,
+  });
+  mockExec.mockResolvedValueOnce({
+    stdout: `${parentSha}\n`,
+    stderr: '',
+    exitCode: 0,
+  });
+  mockExec.mockResolvedValueOnce({
+    stdout: `${EMPTY_TREE_SHA}\n`,
     stderr: '',
     exitCode: 0,
   });
@@ -60,13 +111,12 @@ describe('tool-request tool', () => {
     vi.useRealTimers();
   });
 
-  it('returns commitSha from commit-tree (orphan creation)', async () => {
-    stageHappyPath('', 'new-sha');
+  it('returns commitSha and pushed=true on orphan creation', async () => {
+    stageOrphanPath('new-sha');
 
-    const ctx = makeCtx();
     const result = await toolRequestTool.handler(
-      { toolName: 'deploy', reason: 'Need to deploy to staging' },
-      ctx,
+      { toolName: 'deploy', reason: 'staging' },
+      makeCtx(),
     );
 
     expect(result.success).toBe(true);
@@ -74,37 +124,40 @@ describe('tool-request tool', () => {
       expect(result.data.requested).toBe('deploy');
       expect(result.data.commitSha).toBe('new-sha');
       expect(result.data.fulfilled).toBe(false);
+      expect(result.data.pushed).toBe(true);
     }
 
-    const commitTreeArgs = mockExec.mock.calls[3][1];
-    expect(commitTreeArgs[0]).toBe('commit-tree');
-    expect(commitTreeArgs).not.toContain('-p');
+    // commit-tree (call 3) has no -p on orphan path.
+    expect(mockExec.mock.calls[3][1][0]).toBe('commit-tree');
+    expect(mockExec.mock.calls[3][1]).not.toContain('-p');
 
+    // update-ref (call 4) uses null sha as expected-old.
     const updateArgs = mockExec.mock.calls[4][1];
     expect(updateArgs[0]).toBe('update-ref');
     expect(updateArgs[1]).toBe('refs/heads/tool-requests');
     expect(updateArgs[3]).toBe('0'.repeat(40));
   });
 
-  it('uses existing tip as parent when ref exists', async () => {
-    stageHappyPath('parent-sha', 'new-sha');
+  it('chains onto existing origin tip when local matches origin', async () => {
+    stageParentedPath(FAKE_PARENT_SHA, FAKE_NEW_SHA);
 
     await toolRequestTool.handler(
       { toolName: 'deploy', reason: 'need it' },
       makeCtx(),
     );
 
+    // Call order: ls-remote, rev-parse, hash-object, commit-tree, update-ref, push.
     const commitTreeArgs = mockExec.mock.calls[3][1];
     const pIdx = commitTreeArgs.indexOf('-p');
     expect(pIdx).toBeGreaterThan(-1);
-    expect(commitTreeArgs[pIdx + 1]).toBe('parent-sha');
+    expect(commitTreeArgs[pIdx + 1]).toBe(FAKE_PARENT_SHA);
 
     const updateArgs = mockExec.mock.calls[4][1];
-    expect(updateArgs[3]).toBe('parent-sha');
+    expect(updateArgs[3]).toBe(FAKE_PARENT_SHA);
   });
 
   it('embeds required trailers in commit message', async () => {
-    stageHappyPath('', 'sha');
+    stageOrphanPath('sha');
 
     await toolRequestTool.handler(
       { toolName: 'deploy', reason: 'need it' },
@@ -121,7 +174,7 @@ describe('tool-request tool', () => {
   });
 
   it('never invokes `git commit` against the caller worktree', async () => {
-    stageHappyPath('', 'sha');
+    stageOrphanPath('sha');
 
     await toolRequestTool.handler(
       { toolName: 'deploy', reason: 'need it' },
@@ -133,8 +186,184 @@ describe('tool-request tool', () => {
     }
   });
 
+  it('refuses when caller is on the tool-requests branch', async () => {
+    const ctx = makeCtx({ branch: 'tool-requests' });
+    const result = await toolRequestTool.handler(
+      { toolName: 'deploy', reason: 'need it' },
+      ctx,
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('caller-on-tool-requests');
+      expect(result.error.retryable).toBe(false);
+    }
+    expect(mockExec).not.toHaveBeenCalled();
+    expect(ctx.emit).not.toHaveBeenCalled();
+  });
+
+  it('refuses when caller is on refs/heads/tool-requests', async () => {
+    const result = await toolRequestTool.handler(
+      { toolName: 'deploy', reason: 'need it' },
+      makeCtx({ branch: 'refs/heads/tool-requests' }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('caller-on-tool-requests');
+    }
+  });
+
+  it('errors with tool-requests-diverged when local and origin truly diverge', async () => {
+    // ls-remote ok (origin tip), readLocalTip returns a different sha,
+    // neither is ancestor of the other.
+    mockExec.mockResolvedValueOnce({
+      stdout: `${FAKE_ORIGIN_SHA}\trefs/heads/tool-requests\n`,
+      stderr: '',
+      exitCode: 0,
+    });
+    mockExec.mockResolvedValueOnce({
+      stdout: `${FAKE_LOCAL_SHA}\n`,
+      stderr: '',
+      exitCode: 0,
+    });
+    // merge-base --is-ancestor origin local → not ancestor
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 1 });
+    // merge-base --is-ancestor local origin → not ancestor
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 1 });
+
+    const result = await toolRequestTool.handler(
+      { toolName: 'deploy', reason: 'need it' },
+      makeCtx(),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('tool-requests-diverged');
+      expect(result.error.retryable).toBe(true);
+    }
+  });
+
+  it('treats local-ahead-of-origin as valid (stranded commits) — no fetch', async () => {
+    mockExec.mockResolvedValueOnce({
+      stdout: `${FAKE_ORIGIN_SHA}\trefs/heads/tool-requests\n`,
+      stderr: '',
+      exitCode: 0,
+    });
+    mockExec.mockResolvedValueOnce({
+      stdout: `${FAKE_LOCAL_SHA}\n`,
+      stderr: '',
+      exitCode: 0,
+    });
+    // merge-base --is-ancestor origin local → 0 (origin is ancestor)
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+    // tree, commit-tree, update-ref, push
+    mockExec.mockResolvedValueOnce({
+      stdout: `${EMPTY_TREE_SHA}\n`,
+      stderr: '',
+      exitCode: 0,
+    });
+    mockExec.mockResolvedValueOnce({
+      stdout: `${FAKE_NEW_SHA}\n`,
+      stderr: '',
+      exitCode: 0,
+    });
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+
+    const result = await toolRequestTool.handler(
+      { toolName: 'deploy', reason: 'need it' },
+      makeCtx(),
+    );
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.commitSha).toBe(FAKE_NEW_SHA);
+    }
+
+    // No fetch was run — stranded commits preserved.
+    for (const call of mockExec.mock.calls) {
+      expect(call[1][0]).not.toBe('fetch');
+    }
+
+    // commit-tree parented onto local tip.
+    const commitTreeArgs = mockExec.mock.calls[4][1];
+    const pIdx = commitTreeArgs.indexOf('-p');
+    expect(commitTreeArgs[pIdx + 1]).toBe(FAKE_LOCAL_SHA);
+  });
+
+  it('fetches when origin is strictly ahead of local', async () => {
+    mockExec.mockResolvedValueOnce({
+      stdout: `${FAKE_ORIGIN_SHA}\trefs/heads/tool-requests\n`,
+      stderr: '',
+      exitCode: 0,
+    });
+    mockExec.mockResolvedValueOnce({
+      stdout: `${FAKE_LOCAL_SHA}\n`,
+      stderr: '',
+      exitCode: 0,
+    });
+    // merge-base origin local → not ancestor
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 1 });
+    // merge-base local origin → IS ancestor (origin ahead)
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+    // fetch ok
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+    // readLocalTip after fetch
+    mockExec.mockResolvedValueOnce({
+      stdout: `${FAKE_ORIGIN_SHA}\n`,
+      stderr: '',
+      exitCode: 0,
+    });
+    // tree, commit-tree, update-ref, push
+    mockExec.mockResolvedValueOnce({
+      stdout: `${EMPTY_TREE_SHA}\n`,
+      stderr: '',
+      exitCode: 0,
+    });
+    mockExec.mockResolvedValueOnce({
+      stdout: `${FAKE_NEW_SHA}\n`,
+      stderr: '',
+      exitCode: 0,
+    });
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+
+    const result = await toolRequestTool.handler(
+      { toolName: 'deploy', reason: 'need it' },
+      makeCtx(),
+    );
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.commitSha).toBe(FAKE_NEW_SHA);
+    }
+
+    // commit-tree parented onto origin (post-fetch local tip).
+    const commitTreeArgs = mockExec.mock.calls[7][1];
+    const pIdx = commitTreeArgs.indexOf('-p');
+    expect(commitTreeArgs[pIdx + 1]).toBe(FAKE_ORIGIN_SHA);
+  });
+
+  it('returns origin-unreachable error when ls-remote fails and no local tip', async () => {
+    mockExec.mockResolvedValueOnce({
+      stdout: '',
+      stderr: 'Could not resolve host: github.com',
+      exitCode: 128,
+    });
+    mockExec.mockResolvedValueOnce({
+      stdout: '',
+      stderr: '',
+      exitCode: 1,
+    });
+
+    const result = await toolRequestTool.handler(
+      { toolName: 'deploy', reason: 'need it' },
+      makeCtx(),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('origin-unreachable');
+    }
+  });
+
   it('emits tool-requested event with commitSha', async () => {
-    stageHappyPath('', 'new-sha');
+    stageOrphanPath('new-sha');
 
     const ctx = makeCtx();
     await toolRequestTool.handler(
@@ -154,11 +383,11 @@ describe('tool-request tool', () => {
     );
   });
 
-  it('emits tool-request-push-failed on push failure but still returns ok', async () => {
-    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
-    mockExec.mockResolvedValueOnce({ stdout: '', stderr: 'x', exitCode: 1 });
+  it('emits tool-request-push-failed with pushed=false on push failure', async () => {
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 2 });
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 1 });
     mockExec.mockResolvedValueOnce({
-      stdout: '4b825dc642cb6eb9a060e54bf8d69288fbee4904\n',
+      stdout: `${EMPTY_TREE_SHA}\n`,
       stderr: '',
       exitCode: 0,
     });
@@ -183,6 +412,7 @@ describe('tool-request tool', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.commitSha).toBe('req-sha');
+      expect(result.data.pushed).toBe(false);
     }
     expect(ctx.emit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -196,10 +426,10 @@ describe('tool-request tool', () => {
   });
 
   it('returns error when commit-tree fails', async () => {
-    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
-    mockExec.mockResolvedValueOnce({ stdout: '', stderr: 'x', exitCode: 1 });
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 2 });
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 1 });
     mockExec.mockResolvedValueOnce({
-      stdout: '4b825dc642cb6eb9a060e54bf8d69288fbee4904\n',
+      stdout: `${EMPTY_TREE_SHA}\n`,
       stderr: '',
       exitCode: 0,
     });
@@ -220,8 +450,30 @@ describe('tool-request tool', () => {
     }
   });
 
+  /**
+   * Stage one poll tick that re-syncs with origin (sees origin equals
+   * local, no fetch) and then runs git log.
+   */
+  function stagePollTick(logStdout: string): void {
+    mockExec.mockResolvedValueOnce({
+      stdout: `${FAKE_SAME_SHA}\trefs/heads/tool-requests\n`,
+      stderr: '',
+      exitCode: 0,
+    });
+    mockExec.mockResolvedValueOnce({
+      stdout: `${FAKE_SAME_SHA}\n`,
+      stderr: '',
+      exitCode: 0,
+    });
+    mockExec.mockResolvedValueOnce({
+      stdout: logStdout,
+      stderr: '',
+      exitCode: 0,
+    });
+  }
+
   it('blocking poll resolves fulfilled=true on matching Tool-Request-Sha', async () => {
-    stageHappyPath('', 'req-sha');
+    stageOrphanPath(FAKE_REQ_SHA);
 
     const promise = toolRequestTool.handler(
       {
@@ -234,35 +486,24 @@ describe('tool-request tool', () => {
       makeCtx(),
     );
 
-    // First poll: a commit that is Tool-Requested only — no fulfillment.
-    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
-    mockExec.mockResolvedValueOnce({
-      stdout:
-        'some-other-sha\x00Agent-Id: other\nTool-Requested: other\n\x1e',
-      stderr: '',
-      exitCode: 0,
-    });
+    stagePollTick('other\x00Agent-Id: other\nTool-Requested: other\n\x1e');
     await vi.advanceTimersByTimeAsync(100);
 
-    // Second poll: fulfillment landed.
-    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
-    mockExec.mockResolvedValueOnce({
-      stdout:
-        'fulfill-sha\x00Tool-Provided: deploy\nTool-Request-Sha: req-sha\n\x1e',
-      stderr: '',
-      exitCode: 0,
-    });
+    stagePollTick(
+      `fulfill\x00Tool-Provided: deploy\nTool-Request-Sha: ${FAKE_REQ_SHA}\n\x1e`,
+    );
     await vi.advanceTimersByTimeAsync(100);
 
     const result = await promise;
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.fulfilled).toBe(true);
+      expect(result.data.pushed).toBe(true);
     }
   });
 
   it('blocking poll ignores fulfillment for a different request sha', async () => {
-    stageHappyPath('', 'req-sha');
+    stageOrphanPath(FAKE_REQ_SHA);
 
     const promise = toolRequestTool.handler(
       {
@@ -275,11 +516,27 @@ describe('tool-request tool', () => {
       makeCtx(),
     );
 
-    mockExec.mockResolvedValue({
-      stdout:
-        'x\x00Tool-Provided: deploy\nTool-Request-Sha: other-sha\n\x1e',
-      stderr: '',
-      exitCode: 0,
+    mockExec.mockImplementation(async (_cmd: string, args: string[]) => {
+      const sub = args[0];
+      if (sub === 'ls-remote') {
+        return {
+          stdout: `${FAKE_SAME_SHA}\trefs/heads/tool-requests\n`,
+          stderr: '',
+          exitCode: 0,
+        };
+      }
+      if (sub === 'rev-parse') {
+        return { stdout: `${FAKE_SAME_SHA}\n`, stderr: '', exitCode: 0 };
+      }
+      if (sub === 'log') {
+        return {
+          stdout:
+            'x\x00Tool-Provided: deploy\nTool-Request-Sha: 9999999999999999999999999999999999999999\n\x1e',
+          stderr: '',
+          exitCode: 0,
+        };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
     });
 
     await vi.advanceTimersByTimeAsync(400);
@@ -291,10 +548,59 @@ describe('tool-request tool', () => {
     }
   });
 
-  it('times out when blocking and no fulfillment arrives', async () => {
-    stageHappyPath('', 'req-sha');
+  it('blocking poll bails out on divergence detected during sync', async () => {
+    stageOrphanPath(FAKE_REQ_SHA);
 
-    mockExec.mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+    const promise = toolRequestTool.handler(
+      {
+        toolName: 'deploy',
+        reason: 'need it',
+        blocking: true,
+        pollIntervalMs: 100,
+        timeoutMs: 5000,
+      },
+      makeCtx(),
+    );
+
+    // Poll tick: ls-remote ok, local has different sha, neither ancestor.
+    mockExec.mockResolvedValueOnce({
+      stdout: `${FAKE_ORIGIN_SHA}\trefs/heads/tool-requests\n`,
+      stderr: '',
+      exitCode: 0,
+    });
+    mockExec.mockResolvedValueOnce({
+      stdout: `${FAKE_LOCAL_SHA}\n`,
+      stderr: '',
+      exitCode: 0,
+    });
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 1 });
+    mockExec.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 1 });
+    await vi.advanceTimersByTimeAsync(100);
+
+    const result = await promise;
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('tool-requests-diverged');
+    }
+  });
+
+  it('times out when blocking and no fulfillment arrives', async () => {
+    stageOrphanPath(FAKE_REQ_SHA);
+
+    mockExec.mockImplementation(async (_cmd: string, args: string[]) => {
+      const sub = args[0];
+      if (sub === 'ls-remote') {
+        return {
+          stdout: `${FAKE_SAME_SHA}\trefs/heads/tool-requests\n`,
+          stderr: '',
+          exitCode: 0,
+        };
+      }
+      if (sub === 'rev-parse') {
+        return { stdout: `${FAKE_SAME_SHA}\n`, stderr: '', exitCode: 0 };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
 
     const promise = toolRequestTool.handler(
       {

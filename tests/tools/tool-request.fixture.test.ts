@@ -138,4 +138,144 @@ describe('tool-request (fixture)', () => {
       await fs.rm(origin, { recursive: true, force: true });
     }
   });
+
+  it('recovers a stranded commit on the next successful push', async () => {
+    const repo = await createFixtureRepo();
+    const origin = await fs.mkdtemp(path.join(os.tmpdir(), 'tr-origin-'));
+    const unreachable = path.join(os.tmpdir(), 'tr-nonexistent-' + Date.now());
+
+    try {
+      await exec('git', ['init', '--bare', '-q', origin], process.cwd()).then(
+        (r) => {
+          if (r.exitCode !== 0) throw new Error(r.stderr);
+        },
+      );
+
+      await git(repo.path, ['remote', 'add', 'origin', origin]);
+
+      const ctx: ToolContext = {
+        agentId: 'moss',
+        sessionId: 'fixture-session',
+        role: 'writer',
+        branch: 'main',
+        worktree: repo.path,
+        scope: [],
+        scopeDenied: [],
+        emit: vi.fn(),
+      };
+
+      // First call: ref created locally and on origin.
+      const first = await toolRequestTool.handler(
+        { toolName: 'first-tool', reason: 'initial' },
+        ctx,
+      );
+      expect(first.success).toBe(true);
+      const firstSha = first.success ? first.data.commitSha : '';
+      expect(first.success && first.data.pushed).toBe(true);
+
+      // Break the remote: both ls-remote and push will fail. Because a
+      // local tip exists from step 1, syncWithOrigin falls through to
+      // "serve with local tip" — the stranded path.
+      await git(repo.path, ['remote', 'set-url', 'origin', unreachable]);
+
+      const second = await toolRequestTool.handler(
+        { toolName: 'second-tool', reason: 'offline' },
+        ctx,
+      );
+      expect(second.success).toBe(true);
+      const secondSha = second.success ? second.data.commitSha : '';
+      expect(second.success && second.data.pushed).toBe(false);
+
+      // Local ref advanced even though push failed.
+      expect(
+        await git(repo.path, ['rev-parse', 'refs/heads/tool-requests']),
+      ).toBe(secondSha);
+
+      // Origin still shows only the first commit.
+      expect(
+        await git(origin, ['rev-parse', 'refs/heads/tool-requests']),
+      ).toBe(firstSha);
+
+      // Restore origin. The third call's push carries both the stranded
+      // second commit and the fresh third commit onto origin.
+      await git(repo.path, ['remote', 'set-url', 'origin', origin]);
+
+      const third = await toolRequestTool.handler(
+        { toolName: 'third-tool', reason: 'back online' },
+        ctx,
+      );
+      expect(third.success).toBe(true);
+      const thirdSha = third.success ? third.data.commitSha : '';
+      expect(third.success && third.data.pushed).toBe(true);
+
+      // Origin now holds all three in order first → second → third.
+      expect(
+        await git(origin, ['rev-parse', 'refs/heads/tool-requests']),
+      ).toBe(thirdSha);
+      const originHistory = (
+        await git(origin, [
+          'rev-list',
+          'refs/heads/tool-requests',
+        ])
+      )
+        .split('\n')
+        .filter((l) => l.length > 0);
+      expect(originHistory).toEqual([thirdSha, secondSha, firstSha]);
+    } finally {
+      await repo.cleanup();
+      await fs.rm(origin, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses when caller is checked out to tool-requests', async () => {
+    const repo = await createFixtureRepo();
+    try {
+      // Create the branch and check it out.
+      await git(repo.path, ['checkout', '-b', 'tool-requests']);
+
+      const headBefore = await git(repo.path, ['rev-parse', 'HEAD']);
+      const branchBefore = await git(repo.path, [
+        'rev-parse',
+        '--abbrev-ref',
+        'HEAD',
+      ]);
+      expect(branchBefore).toBe('tool-requests');
+
+      const ctx: ToolContext = {
+        agentId: 'moss',
+        sessionId: 'fixture-session',
+        role: 'writer',
+        branch: 'tool-requests',
+        worktree: repo.path,
+        scope: [],
+        scopeDenied: [],
+        emit: vi.fn(),
+      };
+
+      const result = await toolRequestTool.handler(
+        { toolName: 'x', reason: 'y' },
+        ctx,
+      );
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.code).toBe('caller-on-tool-requests');
+      }
+
+      // HEAD untouched.
+      expect(await git(repo.path, ['rev-parse', 'HEAD'])).toBe(headBefore);
+      expect(
+        await git(repo.path, ['rev-parse', '--abbrev-ref', 'HEAD']),
+      ).toBe('tool-requests');
+
+      // No commit made.
+      const count = await git(repo.path, [
+        'rev-list',
+        '--count',
+        'HEAD',
+      ]);
+      expect(count).toBe('1'); // just the init commit from the fixture
+    } finally {
+      await repo.cleanup();
+    }
+  });
 });
