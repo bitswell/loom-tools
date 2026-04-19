@@ -18,6 +18,8 @@ import { toolRequestTool } from './tool-request.js';
 import { ciGenerateTool } from './ci-generate.js';
 import { repoInitTool } from './repo-init.js';
 import { projectSpawnTool } from './project-spawn.js';
+import { projectApplyTool } from './project-apply.js';
+import { submoduleBumpTool } from './submodule-bump.js';
 import { complianceCheckTool } from './compliance-check.js';
 import { trailerValidateTool } from './trailer-validate.js';
 import { lifecycleCheckTool } from './lifecycle-check.js';
@@ -54,6 +56,8 @@ export { toolRequestTool } from './tool-request.js';
 export { ciGenerateTool, generateCiFiles } from './ci-generate.js';
 export { repoInitTool } from './repo-init.js';
 export { projectSpawnTool } from './project-spawn.js';
+export { projectApplyTool } from './project-apply.js';
+export { submoduleBumpTool } from './submodule-bump.js';
 export { complianceCheckTool, parseOwnerRepo } from './compliance-check.js';
 
 // Protocol-enforcement tools
@@ -105,6 +109,8 @@ export function createDefaultRegistry(): ToolRegistry {
   registry.register(ciGenerateTool);
   registry.register(repoInitTool);
   registry.register(projectSpawnTool);
+  registry.register(projectApplyTool);
+  registry.register(submoduleBumpTool);
   registry.register(complianceCheckTool);
 
   // Protocol-enforcement tools (writer + reviewer + orchestrator)
