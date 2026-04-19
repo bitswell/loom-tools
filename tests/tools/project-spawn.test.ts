@@ -117,4 +117,77 @@ describe('project-spawn tool', () => {
     if (result.success) return;
     expect(result.error.code).toBe('invalid-slug');
   });
+
+  // --- N6–N9: newline-injection rejection (YAML safety) ---
+  it('N6: rejects newline in githubProject', async () => {
+    const result = await projectSpawnTool.handler(
+      { slug: 'x', githubProject: 'https://foo\nslug: hacked' },
+      makeCtx(),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('invalid-input');
+  });
+
+  it('N7: rejects newline in name', async () => {
+    const result = await projectSpawnTool.handler(
+      { slug: 'x', name: 'A\nB' },
+      makeCtx(),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('invalid-input');
+  });
+
+  it('N8: rejects newline in repos array element', async () => {
+    const result = await projectSpawnTool.handler(
+      { slug: 'x', repos: ['ok', 'bad\ninjected: yes'] },
+      makeCtx(),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('invalid-input');
+  });
+
+  it('N9: rejects newline in nested team name', async () => {
+    const result = await projectSpawnTool.handler(
+      { slug: 'x', teams: [{ name: 'runtime\nfoo: bar', agents: [] }] },
+      makeCtx(),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('invalid-input');
+  });
+
+  // --- Structural: top-level keys are exactly the expected set ---
+  it('top-level keys match the expected schema (no teams)', async () => {
+    const result = await projectSpawnTool.handler({ slug: 'kiln' }, makeCtx());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const manifest = result.data.files['projects/kiln.yaml'];
+    const topKeys = manifest
+      .split('\n')
+      .filter((l) => /^[a-z_]+:/.test(l))
+      .map((l) => l.slice(0, l.indexOf(':')));
+    expect(new Set(topKeys)).toEqual(
+      new Set(['slug', 'name', 'description', 'github_project', 'repos', 'agents']),
+    );
+  });
+
+  it('top-level keys include teams when teams provided', async () => {
+    const result = await projectSpawnTool.handler(
+      { slug: 'atlas', teams: [{ name: 'runtime' }] },
+      makeCtx(),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const manifest = result.data.files['projects/atlas.yaml'];
+    const topKeys = manifest
+      .split('\n')
+      .filter((l) => /^[a-z_]+:/.test(l))
+      .map((l) => l.slice(0, l.indexOf(':')));
+    expect(new Set(topKeys)).toEqual(
+      new Set(['slug', 'name', 'description', 'github_project', 'repos', 'agents', 'teams']),
+    );
+  });
 });

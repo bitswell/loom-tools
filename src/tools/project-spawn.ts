@@ -20,25 +20,30 @@ const DEFAULT_AGENTS = [
 
 const DEFAULT_DESCRIPTION = 'TODO: describe this project.';
 
+const NO_NEWLINES = /^[^\n\r]*$/;
+const NO_NEWLINES_MSG = 'must not contain newlines or carriage returns';
+
+const SafeString = z.string().regex(NO_NEWLINES, NO_NEWLINES_MSG);
+
 const ProjectSpawnInput = z.object({
   slug: z.string().describe('Kebab-case project slug (lowercase letters/digits, dashes).'),
-  name: z.string().optional().describe('Display name. Defaults to title-cased slug.'),
-  description: z.string().optional().describe('Free-form description. Defaults to a TODO stub.'),
-  repos: z.array(z.string()).optional().describe('Submodule paths in scope.'),
+  name: SafeString.optional().describe('Display name. Defaults to title-cased slug.'),
+  description: SafeString.optional().describe('Free-form description. Defaults to a TODO stub.'),
+  repos: z.array(SafeString).optional().describe('Submodule paths in scope.'),
   agents: z
-    .array(z.string())
+    .array(SafeString)
     .optional()
     .describe('Agent roster. Defaults to the 11-agent standard roster.'),
   teams: z
     .array(
       z.object({
-        name: z.string(),
-        agents: z.array(z.string()).optional(),
+        name: SafeString,
+        agents: z.array(SafeString).optional(),
       }),
     )
     .optional()
     .describe('Sub-team partitioning for team-of-teams projects.'),
-  githubProject: z.string().optional().describe('GitHub Project board URL.'),
+  githubProject: SafeString.optional().describe('GitHub Project board URL.'),
 });
 
 const ProjectSpawnOutput = z.object({
@@ -128,7 +133,23 @@ export const projectSpawnTool: Tool<ProjectSpawnIn, ProjectSpawnOut> = {
     roles: ['orchestrator'],
   },
   handler: async (input) => {
-    if (!SLUG_RE.test(input.slug)) {
+    // Defense-in-depth: direct handler invocation (tests, in-process
+    // callers) bypasses the MCP layer's schema check. Re-parse here so
+    // the newline-rejection regex on every free-form field runs before
+    // any rendering.
+    const parsed = ProjectSpawnInput.safeParse(input);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const path = issue.path.join('.');
+      return err(
+        'invalid-input',
+        path ? `${path}: ${issue.message}` : issue.message,
+        false,
+      );
+    }
+    const safeInput = parsed.data;
+
+    if (!SLUG_RE.test(safeInput.slug)) {
       return err(
         'invalid-slug',
         'slug must be kebab-case (lowercase letters/digits, dashes; start with a letter, no leading/trailing/double dashes, not empty)',
@@ -137,13 +158,13 @@ export const projectSpawnTool: Tool<ProjectSpawnIn, ProjectSpawnOut> = {
     }
 
     const resolved: ResolvedInput = {
-      slug: input.slug,
-      name: input.name ?? titleCase(input.slug),
-      description: input.description ?? DEFAULT_DESCRIPTION,
-      githubProject: input.githubProject,
-      repos: input.repos ?? [],
-      agents: input.agents ?? [...DEFAULT_AGENTS],
-      teams: input.teams,
+      slug: safeInput.slug,
+      name: safeInput.name ?? titleCase(safeInput.slug),
+      description: safeInput.description ?? DEFAULT_DESCRIPTION,
+      githubProject: safeInput.githubProject,
+      repos: safeInput.repos ?? [],
+      agents: safeInput.agents ?? [...DEFAULT_AGENTS],
+      teams: safeInput.teams,
     };
 
     const manifestPath = `projects/${resolved.slug}.yaml`;
