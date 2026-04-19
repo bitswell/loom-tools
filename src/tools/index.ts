@@ -31,6 +31,7 @@ import { repoCreateTool } from './repo-create.js';
 import { ghPagesEnableTool } from './gh-pages-enable.js';
 import { polyrepoManageTool } from './polyrepo-manage.js';
 import { pipelinePublishTool } from './pipeline-publish.js';
+import { pipelineNoteSetTool } from './pipeline-note-set.js';
 
 // Phase 2 exports
 export { commitTool } from './commit.js';
@@ -74,6 +75,7 @@ export { repoCreateTool } from './repo-create.js';
 export { ghPagesEnableTool } from './gh-pages-enable.js';
 export { polyrepoManageTool } from './polyrepo-manage.js';
 export { pipelinePublishTool } from './pipeline-publish.js';
+export { pipelineNoteSetTool } from './pipeline-note-set.js';
 
 /**
  * Create a registry with all built-in LOOM tools registered.
@@ -126,6 +128,7 @@ export function createDefaultRegistry(): ToolRegistry {
   registry.register(ghPagesEnableTool);
   registry.register(polyrepoManageTool);
   registry.register(pipelinePublishTool);
+  registry.register(pipelineNoteSetTool);
 
   return registry;
 }
