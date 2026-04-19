@@ -17,6 +17,7 @@ import { submoduleTool } from './submodule.js';
 import { toolRequestTool } from './tool-request.js';
 import { ciGenerateTool } from './ci-generate.js';
 import { repoInitTool } from './repo-init.js';
+import { projectSpawnTool } from './project-spawn.js';
 import { complianceCheckTool } from './compliance-check.js';
 import { trailerValidateTool } from './trailer-validate.js';
 import { lifecycleCheckTool } from './lifecycle-check.js';
@@ -52,6 +53,7 @@ export { toolRequestTool } from './tool-request.js';
 // Phase 4 exports
 export { ciGenerateTool, generateCiFiles } from './ci-generate.js';
 export { repoInitTool } from './repo-init.js';
+export { projectSpawnTool } from './project-spawn.js';
 export { complianceCheckTool, parseOwnerRepo } from './compliance-check.js';
 
 // Protocol-enforcement tools
@@ -102,6 +104,7 @@ export function createDefaultRegistry(): ToolRegistry {
   // Phase 4 — repo management tools (orchestrator only)
   registry.register(ciGenerateTool);
   registry.register(repoInitTool);
+  registry.register(projectSpawnTool);
   registry.register(complianceCheckTool);
 
   // Protocol-enforcement tools (writer + reviewer + orchestrator)
