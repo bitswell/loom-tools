@@ -32,12 +32,12 @@ function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
  * child process. This tests the mapping from registry to MCP format.
  */
 describe('tools/list', () => {
-  it('registry contains all 29 tools', () => {
+  it('registry contains all 30 tools', () => {
     const registry = createDefaultRegistry();
-    expect(registry.all()).toHaveLength(29);
+    expect(registry.all()).toHaveLength(30);
   });
 
-  it('orchestrator sees all 29 tools', () => {
+  it('orchestrator sees all 30 tools', () => {
     const registry = createDefaultRegistry();
     const tools = registry.forRole('orchestrator').map((tool) => {
       const def = tool.definition;
@@ -54,7 +54,7 @@ describe('tools/list', () => {
       };
     });
 
-    expect(tools).toHaveLength(29);
+    expect(tools).toHaveLength(30);
 
     // Every tool has required fields
     for (const tool of tools) {
@@ -122,6 +122,7 @@ describe('tools/list', () => {
       'tool-request',
       'ci-generate',
       'repo-init',
+      'project-spawn',
       'compliance-check',
       'trailer-validate',
       'lifecycle-check',
