@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { dispatchCheckTool } from '../../src/tools/dispatch-check.js';
+import { trailerValidateTool } from '../../src/tools/trailer-validate.js';
 import type { ToolContext } from '../../src/types/context.js';
 import { exec } from '../../src/util/exec.js';
 
@@ -406,5 +407,168 @@ describe('dispatch-check tool', () => {
     const rules = ruleIds(result.data.violations);
     expect(rules).toContain('branch-name-shape');
     expect(rules).toContain('scope-paths-exist');
+  });
+
+  // Tripwire: pin the `ctx` surface that rule #4's stub assumes trailer-validate
+  // reads. If trailer-validate grows to call ctx.emit, the stub's no-op swallows
+  // the event silently. This test wraps the stub's emit with a spy and asserts
+  // it is never called during a dispatch-check run that otherwise passes rule #4.
+  it('T1: trailer-validate handler does not touch ctx.emit (rule #4 composition tripwire)', async () => {
+    const wt = await fresh({ slug: 'widget-fix' });
+    await commitAssigned(
+      wt.worktreePath,
+      {},
+      { 'src/a.ts': '// a\n', 'src/b.ts': '// b\n' },
+    );
+
+    const emitSpy = vi.fn();
+    const originalHandler = trailerValidateTool.handler;
+    const handlerSpy = vi
+      .spyOn(trailerValidateTool, 'handler')
+      .mockImplementation(async (input, ctx) => {
+        const wrappedCtx: ToolContext = { ...ctx, emit: emitSpy };
+        return originalHandler(input, wrappedCtx);
+      });
+
+    try {
+      const result = await dispatchCheckTool.handler(
+        { worktree: wt.worktreePath },
+        makeCtx(),
+      );
+      expect(result.success).toBe(true);
+      if (!result.success) throw new Error('unreachable');
+      expect(result.data.violations).toEqual([]);
+
+      expect(handlerSpy).toHaveBeenCalledTimes(1);
+      const passedCtx = handlerSpy.mock.calls[0][1];
+      expect(passedCtx.worktree).toBe(wt.worktreePath);
+      expect(passedCtx.role).toBe('orchestrator');
+      expect(emitSpy).not.toHaveBeenCalled();
+    } finally {
+      handlerSpy.mockRestore();
+    }
+  });
+
+  // Parser commitment: underscore is the org/repo/slug separator. A repo whose
+  // name contains an underscore (e.g. `loom_tools`) cannot be represented — the
+  // parser silently takes `loom` as org, `tools` as repo, everything after as
+  // slug. This test pins that behaviour; a future parser change that allows
+  // underscores in repo names will break it.
+  it('T2: underscore-in-repo-name directory misparses — slug = segment after last _', async () => {
+    const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'loom-underscore-'));
+    cleanups.push(async () => {
+      await fs.rm(parent, { recursive: true, force: true });
+    });
+    const worktreePath = path.join(
+      parent,
+      '.loom',
+      'agents',
+      'test',
+      'worktrees',
+      'loom_tools_dispatch-check',
+    );
+    await fs.mkdir(worktreePath, { recursive: true });
+    await git(worktreePath, ['init', '-q', '-b', 'main']);
+    await git(worktreePath, ['config', 'user.email', 'test.bot@loom.local']);
+    await git(worktreePath, ['config', 'user.name', 'Loom Test Bot']);
+    await git(worktreePath, ['config', 'commit.gpgsign', 'false']);
+    await gitWithStdin(
+      worktreePath,
+      ['commit', '-q', '--allow-empty', '-F', '-'],
+      'init\n',
+    );
+    // Branch named as if repo were 'loom_tools' and slug 'dispatch-check'.
+    // The parser disagrees (slug = 'dispatch-check'), so expected branch is
+    // 'loom/dispatch-check' and the actual 'loom/loom_tools_dispatch-check'
+    // fires branch-name-shape. The repo-name collision itself is invisible.
+    await git(worktreePath, [
+      'checkout',
+      '-q',
+      '-b',
+      'loom/loom_tools_dispatch-check',
+    ]);
+    await commitAssigned(
+      worktreePath,
+      {},
+      { 'src/a.ts': '// a\n', 'src/b.ts': '// b\n' },
+    );
+
+    const result = await dispatchCheckTool.handler(
+      { worktree: worktreePath },
+      makeCtx(),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error('unreachable');
+    const rules = ruleIds(result.data.violations);
+    // Parser matched the path: rule #1 did not fire.
+    expect(rules).not.toContain('worktree-path-shape');
+    // Rule #2 fires: parser-extracted slug 'dispatch-check' != branch suffix.
+    expect(rules).toContain('branch-name-shape');
+    const branchV = result.data.violations.find(
+      (v) => v.rule === 'branch-name-shape',
+    );
+    expect(branchV?.detail).toContain("'loom/dispatch-check'");
+  });
+
+  // Bare-commit case: HEAD is the repo's initial empty commit (no LOOM
+  // trailers). This is what the orchestrator leaves behind when the ASSIGNED
+  // commit is forgotten entirely. Rule #3 (assigned-at-head) fires with a
+  // "no Task-Status trailer" detail; rule #4 cascades — and we assert both
+  // are present and distinct so an operator can read the root cause.
+  it('T3: bare-commit worktree (no ASSIGNED commit) → rule #3 and rule #4 both fire distinctly', async () => {
+    const wt = await fresh({ slug: 'widget-fix' });
+    // Intentionally NO commitAssigned — HEAD stays on the initial empty commit.
+
+    const result = await dispatchCheckTool.handler(
+      { worktree: wt.worktreePath },
+      makeCtx(),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error('unreachable');
+    const rules = ruleIds(result.data.violations);
+    expect(rules).toContain('assigned-at-head');
+    expect(rules).toContain('assigned-trailers-valid');
+
+    const rule3 = result.data.violations.filter(
+      (v) => v.rule === 'assigned-at-head',
+    );
+    expect(rule3.length).toBe(1);
+    expect(rule3[0].detail).toContain('no Task-Status trailer');
+
+    // Rule #4 surfaces trailer-validate's own errors (Agent-Id, Session-Id, ...)
+    // as separate violations — not collapsed into rule #3.
+    const rule4 = result.data.violations.filter(
+      (v) => v.rule === 'assigned-trailers-valid',
+    );
+    expect(rule4.length).toBeGreaterThan(0);
+    expect(rule4.some((v) => v.detail.includes('agent-id-required'))).toBe(
+      true,
+    );
+  });
+
+  // Path-traversal defence on rule #6. A Scope entry that resolves outside the
+  // worktree (e.g. `../../etc/passwd`) used to pass if the resolved file
+  // happened to exist. The defence rejects such entries before the existsSync.
+  it('T4: Scope with path traversal → scope-paths-exist surfaces outside-worktree violation', async () => {
+    const wt = await fresh({ slug: 'widget-fix' });
+    await commitAssigned(
+      wt.worktreePath,
+      { scope: 'src/a.ts ../../../etc/passwd' },
+      { 'src/a.ts': '// a\n' },
+    );
+
+    const result = await dispatchCheckTool.handler(
+      { worktree: wt.worktreePath },
+      makeCtx(),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error('unreachable');
+    const scopeViolations = result.data.violations.filter(
+      (v) => v.rule === 'scope-paths-exist',
+    );
+    expect(scopeViolations.length).toBe(1);
+    expect(scopeViolations[0].detail).toContain('../../../etc/passwd');
+    expect(scopeViolations[0].detail).toContain('outside the worktree');
+    expect(result.data.ok).toBe(false);
   });
 });

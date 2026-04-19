@@ -213,6 +213,18 @@ export const dispatchCheckTool: Tool<DispatchCheckIn, DispatchCheckOut> = {
         .filter((s) => s.length > 0);
       for (const rel of scopePaths) {
         const abs = path.join(worktree, rel);
+        const relFromWorktree = path.relative(worktree, path.resolve(abs));
+        if (
+          relFromWorktree.startsWith('..') ||
+          path.isAbsolute(relFromWorktree)
+        ) {
+          violations.push({
+            rule: 'scope-paths-exist',
+            detail: `Scope path '${rel}' resolves outside the worktree`,
+            severity: 'error',
+          });
+          continue;
+        }
         if (!existsSync(abs)) {
           violations.push({
             rule: 'scope-paths-exist',
