@@ -2,3 +2,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
+
+# Agent runtime state (worktrees, session files)
+.loom/
+
+# Built binaries
+bin/
